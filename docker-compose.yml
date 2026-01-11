@@ -1,0 +1,99 @@
+# Builder Engine - Docker Compose Configuration
+# Starts all services for local development
+
+version: '3.8'
+
+services:
+  # Token Service - JWT token generation for media plane
+  token-service:
+    build:
+      context: ./services/token-service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET:-dev_secret_key_must_be_32_chars_long!}
+      - MEDIA_PLANE_WS_URL=ws://media-bridge:3002
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Media Bridge - WebSocket-based media plane
+  media-bridge:
+    build:
+      context: ./services/media-bridge
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - JWT_SECRET=${JWT_SECRET:-dev_secret_key_must_be_32_chars_long!}
+      - DIALOG_MANAGER_URL=http://dialog-manager:3003
+    depends_on:
+      dialog-manager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Dialog Manager - RAG + LLM orchestration
+  dialog-manager:
+    build:
+      context: ./services/dialog-manager
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=3003
+      - LLM_PROVIDER=mock
+      - VECTOR_DB_PROVIDER=local
+      - VECTOR_DB_PATH=/app/data/vectors.db
+    volumes:
+      - dialog-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3003/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Ingestion Service - Content scraping and persona generation
+  ingestion-service:
+    build:
+      context: ./services/ingestion-service
+      dockerfile: Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=3004
+      - VECTOR_DB_PATH=/app/data/vectors.db
+      - TENANT_CONFIG_PATH=/app/data/tenants
+    volumes:
+      - ingestion-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3004/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  dialog-data:
+  ingestion-data:
+
+networks:
+  default:
+    name: bvrai-network
