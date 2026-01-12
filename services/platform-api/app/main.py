@@ -22,6 +22,9 @@ from app.analytics.routes import router as analytics_router
 from app.knowledge.routes import router as knowledge_router
 from app.webhooks.routes import router as webhooks_router
 
+# Import new API v1 routes
+from app.api.v1 import router as api_v1_router
+
 # Configure structured logging
 structlog.configure(
     processors=[
@@ -142,6 +145,9 @@ app.include_router(calls_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
+
+# Register new comprehensive API v1 routes
+app.include_router(api_v1_router, prefix="/api")
 
 
 # Run with uvicorn
