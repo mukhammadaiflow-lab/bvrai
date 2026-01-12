@@ -153,6 +153,34 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Media Pipeline - Real-time audio processing
+  media-pipeline:
+    build:
+      context: ./services/media-pipeline
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - LOG_LEVEL=info
+      - ASR_SERVICE_URL=http://asr-service:8082
+      - TTS_SERVICE_URL=http://tts-service:8083
+      - CONVERSATION_ENGINE_URL=http://conversation-engine:8084
+      - REDIS_URL=redis://redis:6379/0
+      - MAX_CONCURRENT_SESSIONS=500
+    depends_on:
+      - redis
+      - asr-service
+      - tts-service
+    volumes:
+      - recordings-data:/app/recordings
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   # WebRTC Gateway - Browser-based calls
   webrtc-gateway:
     build:
@@ -287,6 +315,7 @@ volumes:
   postgres-data:
   dialog-data:
   ingestion-data:
+  recordings-data:
 
 networks:
   default:
