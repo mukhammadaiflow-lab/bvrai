@@ -1,4 +1,15 @@
-"""Resilience patterns for fault tolerance."""
+"""
+Enterprise Resilience Patterns
+
+Production-grade fault tolerance with:
+- Circuit breaker pattern
+- Retry with backoff
+- Bulkhead isolation
+- Rate limiting
+- Timeout management
+- Fallback strategies
+- Health monitoring
+"""
 
 from app.resilience.circuit_breaker import (
     CircuitBreaker,
@@ -49,6 +60,50 @@ from app.resilience.rate_limiter import (
     CALL_RATE_LIMIT,
     WEBHOOK_RATE_LIMIT,
     AUTH_RATE_LIMIT,
+)
+from app.resilience.timeout import (
+    TimeoutManager,
+    TimeoutConfig,
+    TimeoutStats,
+    TimeoutExceeded,
+    AdaptiveTimeout,
+    DeadlineContext,
+    CascadingTimeout,
+    timeout,
+    with_timeout,
+    get_current_deadline,
+    set_deadline,
+    clear_deadline,
+)
+from app.resilience.fallback import (
+    FallbackStrategy,
+    DefaultFallback,
+    CacheFallback,
+    CircuitFallback,
+    FallbackChain,
+    CallbackFallback,
+    GracefulDegradation,
+    FeatureFallback,
+    RetryWithFallback,
+    ShedLoadFallback,
+    fallback,
+)
+from app.resilience.health import (
+    HealthChecker,
+    HealthStatus,
+    HealthCheck,
+    HealthCheckResult,
+    ComponentHealth,
+    DependencyHealth,
+    HealthRegistry,
+    DatabaseHealthCheck,
+    RedisHealthCheck,
+    HTTPHealthCheck,
+    CallbackHealthCheck,
+    CompositeHealthCheck,
+    MemoryHealthCheck,
+    DiskHealthCheck,
+    health_check,
 )
 
 __all__ = [
@@ -101,4 +156,48 @@ __all__ = [
     "CALL_RATE_LIMIT",
     "WEBHOOK_RATE_LIMIT",
     "AUTH_RATE_LIMIT",
+
+    # Timeout
+    "TimeoutManager",
+    "TimeoutConfig",
+    "TimeoutStats",
+    "TimeoutExceeded",
+    "AdaptiveTimeout",
+    "DeadlineContext",
+    "CascadingTimeout",
+    "timeout",
+    "with_timeout",
+    "get_current_deadline",
+    "set_deadline",
+    "clear_deadline",
+
+    # Fallback
+    "FallbackStrategy",
+    "DefaultFallback",
+    "CacheFallback",
+    "CircuitFallback",
+    "FallbackChain",
+    "CallbackFallback",
+    "GracefulDegradation",
+    "FeatureFallback",
+    "RetryWithFallback",
+    "ShedLoadFallback",
+    "fallback",
+
+    # Health
+    "HealthChecker",
+    "HealthStatus",
+    "HealthCheck",
+    "HealthCheckResult",
+    "ComponentHealth",
+    "DependencyHealth",
+    "HealthRegistry",
+    "DatabaseHealthCheck",
+    "RedisHealthCheck",
+    "HTTPHealthCheck",
+    "CallbackHealthCheck",
+    "CompositeHealthCheck",
+    "MemoryHealthCheck",
+    "DiskHealthCheck",
+    "health_check",
 ]
