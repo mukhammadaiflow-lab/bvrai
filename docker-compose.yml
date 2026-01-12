@@ -127,6 +127,57 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Platform API - Central API for agents, calls, analytics
+  platform-api:
+    build:
+      context: ./services/platform-api
+      dockerfile: Dockerfile
+    ports:
+      - "8086:8086"
+    environment:
+      - PORT=8086
+      - LOG_LEVEL=info
+      - DATABASE_URL=postgresql+asyncpg://bvrai:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/bvrai
+      - REDIS_URL=redis://redis:6379/0
+      - TELEPHONY_GATEWAY_URL=http://telephony-gateway:8080
+      - CONVERSATION_ENGINE_URL=http://conversation-engine:8084
+      - AI_ORCHESTRATOR_URL=http://ai-orchestrator:8085
+    depends_on:
+      - postgres
+      - redis
+      - ai-orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # WebRTC Gateway - Browser-based calls
+  webrtc-gateway:
+    build:
+      context: ./services/webrtc-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8087:8087"
+      - "3478:3478/udp"  # TURN/STUN
+    environment:
+      - PORT=8087
+      - LOG_LEVEL=info
+      - CONVERSATION_ENGINE_URL=http://conversation-engine:8084
+      - PLATFORM_API_URL=http://platform-api:8086
+      - REDIS_URL=redis://redis:6379/0
+      - TURN_SECRET=${TURN_SECRET:-dev_turn_secret}
+    depends_on:
+      - redis
+      - conversation-engine
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
   # ============================================
   # INFRASTRUCTURE
   # ============================================

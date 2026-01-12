@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.llm import OpenAIAdapter, AnthropicAdapter, MockLLMAdapter, LLMAdapter
 from app.llm.base import Message, Tool
+from app.rag import RAGPipeline, AgentRAGPipeline, RAGResult
 
 # Configure logging
 structlog.configure(
@@ -31,8 +32,10 @@ structlog.configure(
 logger = structlog.get_logger()
 settings = get_settings()
 
-# Global LLM adapter
+# Global adapters
 llm_adapter: Optional[LLMAdapter] = None
+rag_pipeline: Optional[RAGPipeline] = None
+agent_rag_pipelines: dict[str, AgentRAGPipeline] = {}
 
 
 def create_adapter() -> LLMAdapter:
@@ -52,7 +55,7 @@ def create_adapter() -> LLMAdapter:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan."""
-    global llm_adapter
+    global llm_adapter, rag_pipeline
 
     logger.info(
         "Starting AI Orchestrator",
@@ -62,11 +65,20 @@ async def lifespan(app: FastAPI):
 
     llm_adapter = create_adapter()
 
+    # Initialize RAG pipeline
+    if settings.rag_enabled:
+        rag_pipeline = RAGPipeline()
+        logger.info("RAG pipeline initialized")
+
     yield
 
     logger.info("Shutting down AI Orchestrator")
     if llm_adapter:
         await llm_adapter.close()
+    if rag_pipeline:
+        await rag_pipeline.close()
+    for pipeline in agent_rag_pipelines.values():
+        await pipeline.close()
 
 
 app = FastAPI(
@@ -381,6 +393,211 @@ async def handle_voice_turn(request: VoiceTurnRequest):
         return VoiceTurnResponse(
             text="I'm sorry, I encountered an issue. Could you please repeat that?",
         )
+
+
+# ============================================
+# RAG Endpoints
+# ============================================
+
+class IngestDocumentRequest(BaseModel):
+    text: str
+    agent_id: Optional[str] = None
+    source: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+class IngestDocumentResponse(BaseModel):
+    chunk_ids: list[str]
+    chunk_count: int
+
+
+class SearchRequest(BaseModel):
+    query: str
+    agent_id: Optional[str] = None
+    top_k: int = 5
+    filter_metadata: Optional[dict] = None
+
+
+class SearchResultItem(BaseModel):
+    id: str
+    score: float
+    text: str
+    metadata: dict = {}
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: list[SearchResultItem]
+    context: str
+
+
+@app.post("/rag/ingest", response_model=IngestDocumentResponse)
+async def ingest_document(request: IngestDocumentRequest):
+    """
+    Ingest a document into the knowledge base.
+
+    Chunks the document and adds it to the vector store.
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG pipeline not initialized")
+
+    try:
+        # Use agent-specific pipeline if agent_id provided
+        if request.agent_id:
+            if request.agent_id not in agent_rag_pipelines:
+                agent_rag_pipelines[request.agent_id] = AgentRAGPipeline(request.agent_id)
+
+            pipeline = agent_rag_pipelines[request.agent_id]
+        else:
+            pipeline = rag_pipeline
+
+        chunk_ids = await pipeline.ingest_document(
+            text=request.text,
+            metadata=request.metadata,
+            source=request.source,
+        )
+
+        return IngestDocumentResponse(
+            chunk_ids=chunk_ids,
+            chunk_count=len(chunk_ids),
+        )
+
+    except Exception as e:
+        logger.error("Ingestion failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/search", response_model=SearchResponse)
+async def search_knowledge(request: SearchRequest):
+    """
+    Search the knowledge base.
+
+    Returns relevant documents and combined context.
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG pipeline not initialized")
+
+    try:
+        # Use agent-specific pipeline if agent_id provided
+        if request.agent_id:
+            if request.agent_id not in agent_rag_pipelines:
+                agent_rag_pipelines[request.agent_id] = AgentRAGPipeline(request.agent_id)
+
+            pipeline = agent_rag_pipelines[request.agent_id]
+        else:
+            pipeline = rag_pipeline
+
+        result = await pipeline.retrieve(
+            query=request.query,
+            filter_metadata=request.filter_metadata,
+        )
+
+        return SearchResponse(
+            query=result.query,
+            results=[
+                SearchResultItem(
+                    id=r.id,
+                    score=r.score,
+                    text=r.text,
+                    metadata=r.metadata,
+                )
+                for r in result.search_results.results
+            ],
+            context=result.context,
+        )
+
+    except Exception as e:
+        logger.error("Search failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RAGGenerateRequest(BaseModel):
+    query: str
+    agent_id: Optional[str] = None
+    conversation_history: list[MessageInput] = []
+    system_prompt: Optional[str] = None
+    use_rag: bool = True
+
+
+class RAGGenerateResponse(BaseModel):
+    text: str
+    sources: list[dict] = []
+    context_used: bool = False
+
+
+@app.post("/rag/generate", response_model=RAGGenerateResponse)
+async def generate_with_rag(request: RAGGenerateRequest):
+    """
+    Generate a response using RAG.
+
+    Retrieves relevant context, then generates a response.
+    """
+    if not llm_adapter:
+        raise HTTPException(status_code=503, detail="LLM adapter not initialized")
+
+    try:
+        sources = []
+        augmented_query = request.query
+
+        # Get RAG context if enabled
+        if request.use_rag and rag_pipeline:
+            if request.agent_id:
+                if request.agent_id not in agent_rag_pipelines:
+                    agent_rag_pipelines[request.agent_id] = AgentRAGPipeline(request.agent_id)
+                pipeline = agent_rag_pipelines[request.agent_id]
+            else:
+                pipeline = rag_pipeline
+
+            rag_result = await pipeline.retrieve(request.query)
+
+            if rag_result.has_context:
+                augmented_query = f"Context:\n{rag_result.context}\n\nQuestion: {request.query}"
+                sources = rag_result.sources
+
+        # Build messages
+        messages = [
+            Message(role=msg.role, content=msg.content)
+            for msg in request.conversation_history
+        ]
+        messages.append(Message(role="user", content=augmented_query))
+
+        # Generate response
+        response = await llm_adapter.generate(
+            messages=messages,
+            system_prompt=request.system_prompt,
+        )
+
+        return RAGGenerateResponse(
+            text=response.text,
+            sources=sources,
+            context_used=bool(sources),
+        )
+
+    except Exception as e:
+        logger.error("RAG generation failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/rag/documents/{source}")
+async def delete_documents(source: str, agent_id: Optional[str] = None):
+    """Delete all documents from a source."""
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG pipeline not initialized")
+
+    try:
+        if agent_id:
+            if agent_id not in agent_rag_pipelines:
+                return {"deleted": 0}
+            pipeline = agent_rag_pipelines[agent_id]
+        else:
+            pipeline = rag_pipeline
+
+        deleted = await pipeline.delete_by_source(source)
+        return {"deleted": deleted, "source": source}
+
+    except Exception as e:
+        logger.error("Delete failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
