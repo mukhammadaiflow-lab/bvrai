@@ -1,51 +1,191 @@
 # Builder Engine - Docker Compose Configuration
-# Starts all services for local development
+# Production-ready voice AI platform
 
 version: '3.8'
 
 services:
-  # Token Service - JWT token generation for media plane
-  token-service:
-    build:
-      context: ./services/token-service
-      dockerfile: Dockerfile
-    ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=development
-      - PORT=3001
-      - JWT_SECRET=${JWT_SECRET:-dev_secret_key_must_be_32_chars_long!}
-      - MEDIA_PLANE_WS_URL=ws://media-bridge:3002
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
+  # ============================================
+  # CORE SERVICES
+  # ============================================
 
-  # Media Bridge - WebSocket-based media plane
-  media-bridge:
+  # Telephony Gateway - Handles Twilio/phone calls
+  telephony-gateway:
     build:
-      context: ./services/media-bridge
+      context: ./services/telephony-gateway
       dockerfile: Dockerfile
     ports:
-      - "3002:3002"
+      - "8080:8080"
     environment:
-      - NODE_ENV=development
-      - PORT=3002
-      - JWT_SECRET=${JWT_SECRET:-dev_secret_key_must_be_32_chars_long!}
-      - DIALOG_MANAGER_URL=http://dialog-manager:3003
+      - PORT=8080
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - TWILIO_WEBHOOK_URL=${TWILIO_WEBHOOK_URL:-http://localhost:8080}
+      - MEDIA_PIPELINE_URL=media-pipeline:8081
+      - MAX_CONCURRENT_CALLS=100
     depends_on:
-      dialog-manager:
-        condition: service_healthy
+      - asr-service
+      - tts-service
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
     restart: unless-stopped
 
-  # Dialog Manager - RAG + LLM orchestration
+  # ASR Service - Speech-to-text
+  asr-service:
+    build:
+      context: ./services/asr-service
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - LOG_LEVEL=info
+      - ASR_PROVIDER=${ASR_PROVIDER:-mock}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - DEEPGRAM_MODEL=nova-2
+      - MAX_CONNECTIONS=100
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # TTS Service - Text-to-speech
+  tts-service:
+    build:
+      context: ./services/tts-service
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - LOG_LEVEL=info
+      - TTS_PROVIDER=${TTS_PROVIDER:-mock}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Conversation Engine - Turn management & state
+  conversation-engine:
+    build:
+      context: ./services/conversation-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
+      - LOG_LEVEL=info
+      - ASR_SERVICE_URL=http://asr-service:8082
+      - TTS_SERVICE_URL=http://tts-service:8083
+      - AI_ORCHESTRATOR_URL=http://ai-orchestrator:8085
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - asr-service
+      - tts-service
+      - ai-orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # AI Orchestrator - LLM & RAG
+  ai-orchestrator:
+    build:
+      context: ./services/ai-orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+      - LOG_LEVEL=info
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_MODEL=gpt-4o-mini
+      - RAG_ENABLED=true
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      - qdrant
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
+  # INFRASTRUCTURE
+  # ============================================
+
+  # Redis - Caching & pub/sub
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Qdrant - Vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # PostgreSQL - Primary database
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=bvrai
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
+      - POSTGRES_DB=bvrai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bvrai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # LEGACY SERVICES (from initial scaffold)
+  # ============================================
+
+  # Dialog Manager (legacy - for backward compat)
   dialog-manager:
     build:
       context: ./services/dialog-manager
@@ -68,7 +208,7 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # Ingestion Service - Content scraping and persona generation
+  # Ingestion Service
   ingestion-service:
     build:
       context: ./services/ingestion-service
@@ -91,6 +231,9 @@ services:
     restart: unless-stopped
 
 volumes:
+  redis-data:
+  qdrant-data:
+  postgres-data:
   dialog-data:
   ingestion-data:
 
