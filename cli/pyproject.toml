@@ -1,0 +1,117 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "builderengine-cli"
+version = "1.0.0"
+description = "Command-line interface for Builder Engine AI Voice Agent Platform"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Builder Engine", email = "support@builderengine.io"}
+]
+maintainers = [
+    {name = "Builder Engine", email = "support@builderengine.io"}
+]
+keywords = [
+    "cli",
+    "voice",
+    "ai",
+    "telephony",
+    "voice-agents",
+    "builderengine",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Telephony",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.1.0",
+    "httpx>=0.25.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "keyring>=24.0.0",
+    "platformdirs>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+builderengine = "builderengine_cli.main:cli"
+bvr = "builderengine_cli.main:cli"
+
+[project.urls]
+Homepage = "https://builderengine.io"
+Documentation = "https://docs.builderengine.io/cli"
+Repository = "https://github.com/builderengine/cli"
+Issues = "https://github.com/builderengine/cli/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["builderengine_cli"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
