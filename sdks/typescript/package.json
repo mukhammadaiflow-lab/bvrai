@@ -1,0 +1,94 @@
+{
+  "name": "@builderengine/sdk",
+  "version": "1.0.0",
+  "description": "Official TypeScript/JavaScript SDK for Builder Engine AI Voice Agent Platform",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./streaming": {
+      "import": "./dist/streaming.mjs",
+      "require": "./dist/streaming.js",
+      "types": "./dist/streaming.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/streaming.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts src/streaming.ts --format cjs,esm --dts --watch",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build",
+    "release": "npm run build && npm publish --access public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/builderengine/sdk-typescript.git"
+  },
+  "keywords": [
+    "builderengine",
+    "voice-agent",
+    "ai",
+    "telephony",
+    "voip",
+    "sip",
+    "twilio",
+    "vonage",
+    "sdk",
+    "typescript",
+    "conversational-ai",
+    "speech-to-text",
+    "text-to-speech",
+    "realtime",
+    "websocket"
+  ],
+  "author": "Builder Engine <support@builderengine.io>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/builderengine/sdk-typescript/issues"
+  },
+  "homepage": "https://docs.builderengine.io/sdks/typescript",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "eslint": "^8.55.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.0",
+    "msw": "^2.0.0",
+    "prettier": "^3.1.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  },
+  "peerDependencies": {
+    "ws": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  }
+}
