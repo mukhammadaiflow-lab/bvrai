@@ -1,0 +1,122 @@
+# Load Testing Configuration for Builder Engine
+# Copy this file and customize for your environment
+
+# Target Configuration
+target:
+  base_url: "http://localhost:8000"
+  api_key: "${BE_API_KEY}"  # Set via environment variable
+  organization_id: "${BE_ORG_ID}"
+  websocket_url: "ws://localhost:8000/ws"
+  database_url: "postgresql://localhost:5432/builderengine"
+
+# Load Profiles
+profiles:
+  # Quick smoke test
+  smoke:
+    concurrent_users: 5
+    requests_per_second: 10
+    duration_seconds: 30
+    ramp_up_seconds: 5
+    ramp_down_seconds: 5
+
+  # Light load test
+  light:
+    concurrent_users: 10
+    requests_per_second: 50
+    duration_seconds: 60
+    ramp_up_seconds: 10
+    ramp_down_seconds: 5
+
+  # Normal load test
+  normal:
+    concurrent_users: 50
+    requests_per_second: 200
+    duration_seconds: 300
+    ramp_up_seconds: 30
+    ramp_down_seconds: 15
+
+  # Heavy load test
+  heavy:
+    concurrent_users: 100
+    requests_per_second: 500
+    duration_seconds: 600
+    ramp_up_seconds: 60
+    ramp_down_seconds: 30
+
+  # Stress test (find breaking point)
+  stress:
+    concurrent_users: 200
+    requests_per_second: 1000
+    duration_seconds: 300
+    ramp_up_seconds: 120
+    ramp_down_seconds: 30
+
+  # Soak test (stability over time)
+  soak:
+    concurrent_users: 30
+    requests_per_second: 100
+    duration_seconds: 3600  # 1 hour
+    ramp_up_seconds: 60
+    ramp_down_seconds: 60
+
+  # Spike test (sudden load increase)
+  spike:
+    concurrent_users: 150
+    requests_per_second: 500
+    duration_seconds: 120
+    ramp_up_seconds: 5  # Very fast ramp-up
+    ramp_down_seconds: 5
+
+# Thresholds (SLOs)
+thresholds:
+  max_avg_response_time_ms: 500
+  max_p95_response_time_ms: 1000
+  max_p99_response_time_ms: 2000
+  max_error_rate: 0.01  # 1%
+  min_requests_per_second: 50
+
+# Request Configuration
+requests:
+  timeout_seconds: 30
+  connection_timeout_seconds: 10
+
+# Test Scenarios
+scenarios:
+  - name: api_load
+    enabled: true
+    weight: 40
+
+  - name: call_simulation
+    enabled: true
+    weight: 30
+
+  - name: websocket
+    enabled: true
+    weight: 20
+
+  - name: database
+    enabled: false  # Enable if database tests needed
+    weight: 10
+
+# Output Configuration
+output:
+  directory: "./load_test_results"
+  save_detailed_results: true
+  formats:
+    - json
+    - html
+    - markdown
+
+# Notifications (optional)
+notifications:
+  slack:
+    enabled: false
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    notify_on_failure: true
+    notify_on_success: false
+
+  email:
+    enabled: false
+    smtp_server: "smtp.example.com"
+    recipients:
+      - "team@example.com"
