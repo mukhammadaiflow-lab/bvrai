@@ -1,0 +1,157 @@
+---
+# Platform API Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-api-config
+  namespace: builder-engine
+  labels:
+    app: platform-api
+data:
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  CORS_ORIGINS: "https://app.builderengine.io,https://api.builderengine.io"
+
+  # Database
+  DATABASE_POOL_SIZE: "20"
+  DATABASE_MAX_OVERFLOW: "10"
+  DATABASE_POOL_TIMEOUT: "30"
+
+  # Redis
+  REDIS_MAX_CONNECTIONS: "50"
+  REDIS_SOCKET_TIMEOUT: "5"
+
+  # Rate Limiting
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_DEFAULT: "100"
+  RATE_LIMIT_BURST: "20"
+
+  # Features
+  FEATURE_ANALYTICS_ENABLED: "true"
+  FEATURE_WORKFLOWS_ENABLED: "true"
+  FEATURE_KNOWLEDGE_BASE_ENABLED: "true"
+---
+# Voice Engine Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voice-engine-config
+  namespace: builder-engine
+  labels:
+    app: voice-engine
+data:
+  # Audio settings
+  AUDIO_SAMPLE_RATE: "16000"
+  AUDIO_CHANNELS: "1"
+  AUDIO_BIT_DEPTH: "16"
+  AUDIO_FRAME_SIZE: "320"
+
+  # VAD settings
+  VAD_THRESHOLD: "0.5"
+  VAD_FRAME_DURATION_MS: "30"
+  VAD_PADDING_DURATION_MS: "300"
+
+  # TTS settings
+  TTS_DEFAULT_PROVIDER: "elevenlabs"
+  TTS_CACHE_ENABLED: "true"
+  TTS_CACHE_TTL: "3600"
+
+  # STT settings
+  STT_DEFAULT_PROVIDER: "deepgram"
+  STT_INTERIM_RESULTS: "true"
+  STT_PUNCTUATION: "true"
+---
+# Conversation Engine Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conversation-engine-config
+  namespace: builder-engine
+  labels:
+    app: conversation-engine
+data:
+  # LLM settings
+  LLM_DEFAULT_PROVIDER: "openai"
+  LLM_DEFAULT_MODEL: "gpt-4"
+  LLM_MAX_TOKENS: "1000"
+  LLM_TEMPERATURE: "0.7"
+  LLM_TIMEOUT: "30"
+
+  # Conversation settings
+  CONVERSATION_MAX_TURNS: "100"
+  CONVERSATION_CONTEXT_WINDOW: "20"
+  CONVERSATION_TIMEOUT_SECONDS: "300"
+
+  # Turn-taking settings
+  TURN_MIN_SILENCE_MS: "500"
+  TURN_MAX_DURATION_SECONDS: "60"
+  TURN_ALLOW_BARGE_IN: "true"
+---
+# WebRTC Gateway Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webrtc-gateway-config
+  namespace: builder-engine
+  labels:
+    app: webrtc-gateway
+data:
+  # WebRTC settings
+  WEBRTC_ICE_SERVERS: '["stun:stun.l.google.com:19302"]'
+  WEBRTC_MAX_BITRATE: "128000"
+  WEBRTC_DTLS_TIMEOUT: "10"
+
+  # Janus settings
+  JANUS_API_URL: "http://janus:8088/janus"
+  JANUS_ADMIN_SECRET: ""
+
+  # Media settings
+  MEDIA_CODEC: "opus"
+  MEDIA_SAMPLE_RATE: "48000"
+---
+# Dashboard Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-config
+  namespace: builder-engine
+  labels:
+    app: dashboard
+data:
+  NEXT_PUBLIC_API_URL: "https://api.builderengine.io"
+  NEXT_PUBLIC_WS_URL: "wss://ws.builderengine.io"
+  NEXT_PUBLIC_APP_NAME: "Builder Engine"
+  NEXT_PUBLIC_SUPPORT_EMAIL: "support@builderengine.io"
+---
+# Shared Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shared-config
+  namespace: builder-engine
+data:
+  # Service discovery
+  PLATFORM_API_URL: "http://platform-api:8000"
+  VOICE_ENGINE_URL: "http://voice-engine:8001"
+  CONVERSATION_ENGINE_URL: "http://conversation-engine:8002"
+  WEBRTC_GATEWAY_URL: "http://webrtc-gateway:8003"
+
+  # Message queue
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_VHOST: "builder-engine"
+
+  # Cache
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # Database
+  POSTGRES_HOST: "postgresql"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "builder_engine"
+
+  # Object storage
+  S3_ENDPOINT: "http://minio:9000"
+  S3_BUCKET_RECORDINGS: "recordings"
+  S3_BUCKET_DOCUMENTS: "documents"

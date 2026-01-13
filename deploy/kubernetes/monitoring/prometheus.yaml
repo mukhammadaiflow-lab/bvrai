@@ -1,0 +1,355 @@
+---
+# Prometheus ServiceMonitors for Builder Engine
+# These define scrape targets for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: platform-api-monitor
+  namespace: builder-engine
+  labels:
+    app: platform-api
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: platform-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: voice-engine-monitor
+  namespace: builder-engine
+  labels:
+    app: voice-engine
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: voice-engine
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: conversation-engine-monitor
+  namespace: builder-engine
+  labels:
+    app: conversation-engine
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: conversation-engine
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: webrtc-gateway-monitor
+  namespace: builder-engine
+  labels:
+    app: webrtc-gateway
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: webrtc-gateway
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgresql-monitor
+  namespace: builder-engine
+  labels:
+    app: postgresql
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: postgresql
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 15s
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-monitor
+  namespace: builder-engine
+  labels:
+    app: redis
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  endpoints:
+    - port: metrics
+      interval: 30s
+      scrapeTimeout: 15s
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq-monitor
+  namespace: builder-engine
+  labels:
+    app: rabbitmq
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq
+  endpoints:
+    - port: prometheus
+      interval: 30s
+      scrapeTimeout: 15s
+  namespaceSelector:
+    matchNames:
+      - builder-engine
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: builder-engine-alerts
+  namespace: builder-engine
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: builder-engine.rules
+      rules:
+        # High error rate
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{status=~"5..", namespace="builder-engine"}[5m]))
+            /
+            sum(rate(http_requests_total{namespace="builder-engine"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: High error rate in Builder Engine
+            description: "Error rate is {{ $value | humanizePercentage }} (> 5%)"
+
+        # High latency
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace="builder-engine"}[5m])) by (le, service))
+            > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High latency detected
+            description: "95th percentile latency is {{ $value }}s for {{ $labels.service }}"
+
+        # Pod not ready
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_ready{namespace="builder-engine", condition="true"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pod not ready
+            description: "Pod {{ $labels.pod }} has been not ready for 5 minutes"
+
+        # High memory usage
+        - alert: HighMemoryUsage
+          expr: |
+            container_memory_working_set_bytes{namespace="builder-engine"}
+            /
+            container_spec_memory_limit_bytes{namespace="builder-engine"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High memory usage
+            description: "Container {{ $labels.container }} is using {{ $value | humanizePercentage }} of memory limit"
+
+        # High CPU usage
+        - alert: HighCPUUsage
+          expr: |
+            rate(container_cpu_usage_seconds_total{namespace="builder-engine"}[5m])
+            /
+            container_spec_cpu_quota{namespace="builder-engine"} * 100000 > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High CPU usage
+            description: "Container {{ $labels.container }} is using {{ $value | humanizePercentage }} of CPU limit"
+
+        # Call processing queue buildup
+        - alert: CallQueueBacklog
+          expr: |
+            rabbitmq_queue_messages{queue="call.processing"} > 100
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Call processing queue backlog
+            description: "Call processing queue has {{ $value }} messages pending"
+
+        # WebRTC connection failures
+        - alert: WebRTCConnectionFailures
+          expr: |
+            sum(rate(webrtc_connection_failures_total{namespace="builder-engine"}[5m])) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High WebRTC connection failure rate
+            description: "{{ $value }} WebRTC connection failures per second"
+
+        # Voice transcription latency
+        - alert: HighTranscriptionLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(transcription_duration_seconds_bucket{namespace="builder-engine"}[5m])) by (le))
+            > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High transcription latency
+            description: "95th percentile transcription latency is {{ $value }}s"
+
+        # Database connection pool exhausted
+        - alert: DatabaseConnectionPoolExhausted
+          expr: |
+            pg_pool_available_connections{namespace="builder-engine"} < 5
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: Database connection pool nearly exhausted
+            description: "Only {{ $value }} database connections available"
+
+        # Redis memory pressure
+        - alert: RedisMemoryPressure
+          expr: |
+            redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Redis memory pressure
+            description: "Redis is using {{ $value | humanizePercentage }} of max memory"
+
+        # Active calls threshold
+        - alert: HighActiveCalls
+          expr: |
+            sum(active_calls_total{namespace="builder-engine"}) > 1000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High number of active calls
+            description: "{{ $value }} active calls in the system"
+
+        # API rate limit hits
+        - alert: HighRateLimitHits
+          expr: |
+            sum(rate(rate_limit_hits_total{namespace="builder-engine"}[5m])) > 100
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: High rate limit hit rate
+            description: "{{ $value }} rate limit hits per second"
+
+    - name: builder-engine-slo.rules
+      rules:
+        # SLO: API availability > 99.9%
+        - record: builder_engine:api_availability:ratio
+          expr: |
+            1 - (
+              sum(rate(http_requests_total{status=~"5..", namespace="builder-engine", service="platform-api"}[5m]))
+              /
+              sum(rate(http_requests_total{namespace="builder-engine", service="platform-api"}[5m]))
+            )
+
+        - alert: APIAvailabilitySLOBreach
+          expr: builder_engine:api_availability:ratio < 0.999
+          for: 5m
+          labels:
+            severity: critical
+            slo: availability
+          annotations:
+            summary: API availability SLO breach
+            description: "API availability is {{ $value | humanizePercentage }} (< 99.9%)"
+
+        # SLO: Call setup time < 2s (95th percentile)
+        - record: builder_engine:call_setup_latency:p95
+          expr: |
+            histogram_quantile(0.95, sum(rate(call_setup_duration_seconds_bucket{namespace="builder-engine"}[5m])) by (le))
+
+        - alert: CallSetupLatencySLOBreach
+          expr: builder_engine:call_setup_latency:p95 > 2
+          for: 5m
+          labels:
+            severity: warning
+            slo: latency
+          annotations:
+            summary: Call setup latency SLO breach
+            description: "95th percentile call setup time is {{ $value }}s (> 2s)"
+
+        # SLO: Transcription accuracy > 95%
+        - record: builder_engine:transcription_accuracy:ratio
+          expr: |
+            sum(rate(transcription_correct_total{namespace="builder-engine"}[1h]))
+            /
+            sum(rate(transcription_total{namespace="builder-engine"}[1h]))
+
+        - alert: TranscriptionAccuracySLOBreach
+          expr: builder_engine:transcription_accuracy:ratio < 0.95
+          for: 30m
+          labels:
+            severity: warning
+            slo: quality
+          annotations:
+            summary: Transcription accuracy SLO breach
+            description: "Transcription accuracy is {{ $value | humanizePercentage }} (< 95%)"

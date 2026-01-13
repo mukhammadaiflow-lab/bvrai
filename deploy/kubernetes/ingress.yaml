@@ -1,0 +1,218 @@
+---
+# Main Ingress for all services
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: builder-engine-ingress
+  namespace: builder-engine
+  labels:
+    app: builder-engine
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.builderengine.io
+        - app.builderengine.io
+        - voice.builderengine.io
+        - ws.builderengine.io
+      secretName: builder-engine-tls
+  rules:
+    # API Gateway
+    - host: api.builderengine.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-api
+                port:
+                  number: 8000
+    # Dashboard
+    - host: app.builderengine.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 3000
+    # Voice Engine (for direct voice API access)
+    - host: voice.builderengine.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: voice-engine
+                port:
+                  number: 8001
+---
+# WebSocket Ingress for real-time connections
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: builder-engine-websocket-ingress
+  namespace: builder-engine
+  labels:
+    app: builder-engine
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ws.builderengine.io
+      secretName: builder-engine-ws-tls
+  rules:
+    - host: ws.builderengine.io
+      http:
+        paths:
+          # WebRTC signaling
+          - path: /webrtc
+            pathType: Prefix
+            backend:
+              service:
+                name: webrtc-gateway
+                port:
+                  number: 8004
+          # Real-time call events
+          - path: /calls
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-api
+                port:
+                  number: 8000
+          # Conversation streaming
+          - path: /conversations
+            pathType: Prefix
+            backend:
+              service:
+                name: conversation-engine
+                port:
+                  number: 8002
+---
+# Internal API Ingress (for internal service mesh)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: builder-engine-internal-ingress
+  namespace: builder-engine
+  labels:
+    app: builder-engine
+  annotations:
+    kubernetes.io/ingress.class: nginx-internal
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+spec:
+  ingressClassName: nginx-internal
+  rules:
+    - host: internal-api.builder-engine.svc.cluster.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-api
+                port:
+                  number: 8000
+          - path: /voice
+            pathType: Prefix
+            backend:
+              service:
+                name: voice-engine
+                port:
+                  number: 8001
+          - path: /conversation
+            pathType: Prefix
+            backend:
+              service:
+                name: conversation-engine
+                port:
+                  number: 8002
+          - path: /webrtc
+            pathType: Prefix
+            backend:
+              service:
+                name: webrtc-gateway
+                port:
+                  number: 8003
+---
+# Certificate Issuer
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@builderengine.io
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+---
+# Certificate for main domains
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: builder-engine-certificate
+  namespace: builder-engine
+spec:
+  secretName: builder-engine-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - api.builderengine.io
+    - app.builderengine.io
+    - voice.builderengine.io
+    - ws.builderengine.io
+---
+# CORS middleware ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-cors-config
+  namespace: builder-engine
+data:
+  cors-snippet: |
+    if ($request_method = 'OPTIONS') {
+      add_header 'Access-Control-Allow-Origin' '$http_origin' always;
+      add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
+      add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-API-Key,X-Tenant-ID' always;
+      add_header 'Access-Control-Max-Age' 1728000;
+      add_header 'Content-Type' 'text/plain; charset=utf-8';
+      add_header 'Content-Length' 0;
+      return 204;
+    }
+    add_header 'Access-Control-Allow-Origin' '$http_origin' always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
+    add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-API-Key,X-Tenant-ID' always;
+    add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range,X-Request-ID' always;

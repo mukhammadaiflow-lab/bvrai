@@ -1,0 +1,94 @@
+---
+# Namespace for Builder Engine
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: builder-engine
+  labels:
+    app.kubernetes.io/name: builder-engine
+    app.kubernetes.io/part-of: builder-engine-platform
+    environment: production
+---
+# ResourceQuota for the namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: builder-engine-quota
+  namespace: builder-engine
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: 100Gi
+    limits.cpu: "100"
+    limits.memory: 200Gi
+    pods: "100"
+    services: "50"
+    secrets: "100"
+    configmaps: "50"
+    persistentvolumeclaims: "20"
+---
+# LimitRange for default resource limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: builder-engine-limits
+  namespace: builder-engine
+spec:
+  limits:
+    - default:
+        cpu: "1"
+        memory: 2Gi
+      defaultRequest:
+        cpu: "100m"
+        memory: 256Mi
+      type: Container
+    - max:
+        cpu: "8"
+        memory: 16Gi
+      min:
+        cpu: "50m"
+        memory: 64Mi
+      type: Container
+---
+# Network Policy - Default deny all
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: builder-engine
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Network Policy - Allow internal communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal
+  namespace: builder-engine
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: builder-engine
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: builder-engine
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

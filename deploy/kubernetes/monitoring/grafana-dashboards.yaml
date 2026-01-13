@@ -1,0 +1,536 @@
+---
+# Grafana Dashboard ConfigMaps for Builder Engine
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-overview
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  builder-engine-overview.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "expr": "sum(active_calls_total{namespace=\"builder-engine\"})",
+              "refId": "A"
+            }
+          ],
+          "title": "Active Calls",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(calls_total{namespace=\"builder-engine\"}[1h])) * 3600",
+              "refId": "A"
+            }
+          ],
+          "title": "Calls Per Hour",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "builder_engine:api_availability:ratio * 100",
+              "refId": "A"
+            }
+          ],
+          "title": "API Availability %",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": ["lastNotNull"],
+              "fields": "",
+              "values": false
+            }
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le)) * 1000",
+              "refId": "A"
+            }
+          ],
+          "title": "P95 Latency (ms)",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "id": 5,
+          "options": {
+            "legend": {"calcs": [], "displayMode": "list", "placement": "bottom"},
+            "tooltip": {"mode": "single"}
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(http_requests_total{namespace=\"builder-engine\"}[5m])) by (service)",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Rate by Service",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "id": 6,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le, service))",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "P95 Latency by Service",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "id": 7,
+          "targets": [
+            {
+              "expr": "sum(rate(http_requests_total{namespace=\"builder-engine\", status=~\"5..\"}[5m])) by (service)",
+              "legendFormat": "{{service}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Error Rate by Service",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "id": 8,
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=\"builder-engine\"}) by (pod) / 1024 / 1024",
+              "legendFormat": "{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Memory Usage by Pod (MB)",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["builder-engine"],
+      "templating": {"list": []},
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Builder Engine Overview",
+      "uid": "builder-engine-overview",
+      "version": 1
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-calls
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  builder-engine-calls.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "id": 1,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          },
+          "targets": [{"expr": "sum(active_calls_total{namespace=\"builder-engine\"})", "refId": "A"}],
+          "title": "Active Calls",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          },
+          "targets": [{"expr": "sum(increase(calls_total{namespace=\"builder-engine\"}[24h]))", "refId": "A"}],
+          "title": "Calls Today",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          },
+          "targets": [{"expr": "avg(call_duration_seconds{namespace=\"builder-engine\"})", "refId": "A"}],
+          "title": "Avg Call Duration (s)",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          },
+          "targets": [{"expr": "builder_engine:call_setup_latency:p95 * 1000", "refId": "A"}],
+          "title": "P95 Setup Time (ms)",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+          "id": 5,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          },
+          "targets": [{"expr": "sum(rate(call_failures_total{namespace=\"builder-engine\"}[5m])) / sum(rate(calls_total{namespace=\"builder-engine\"}[5m])) * 100", "refId": "A"}],
+          "title": "Failure Rate %",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+          "id": 6,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {"calcs": ["lastNotNull"]}
+          },
+          "targets": [{"expr": "sum(rate(call_minutes_total{namespace=\"builder-engine\"}[1h])) * 60", "refId": "A"}],
+          "title": "Minutes/Hour",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "id": 7,
+          "targets": [
+            {"expr": "sum(active_calls_total{namespace=\"builder-engine\"}) by (direction)", "legendFormat": "{{direction}}", "refId": "A"}
+          ],
+          "title": "Active Calls by Direction",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "id": 8,
+          "targets": [
+            {"expr": "histogram_quantile(0.50, sum(rate(call_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le))", "legendFormat": "p50", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, sum(rate(call_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le))", "legendFormat": "p95", "refId": "B"},
+            {"expr": "histogram_quantile(0.99, sum(rate(call_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le))", "legendFormat": "p99", "refId": "C"}
+          ],
+          "title": "Call Duration Distribution",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "id": 9,
+          "targets": [
+            {"expr": "sum(rate(calls_total{namespace=\"builder-engine\"}[5m])) by (status)", "legendFormat": "{{status}}", "refId": "A"}
+          ],
+          "title": "Call Rate by Status",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "id": 10,
+          "targets": [
+            {"expr": "topk(10, sum(rate(calls_total{namespace=\"builder-engine\"}[1h])) by (agent_id))", "legendFormat": "{{agent_id}}", "refId": "A"}
+          ],
+          "title": "Top 10 Agents by Call Volume",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+          "id": 11,
+          "targets": [
+            {"expr": "sum(rate(call_failures_total{namespace=\"builder-engine\"}[5m])) by (reason)", "legendFormat": "{{reason}}", "refId": "A"}
+          ],
+          "title": "Failure Reasons",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "tags": ["builder-engine", "calls"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Builder Engine - Calls",
+      "uid": "builder-engine-calls",
+      "version": 1
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-voice
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  builder-engine-voice.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "sum(active_transcriptions{namespace=\"builder-engine\"})", "refId": "A"}],
+          "title": "Active Transcriptions",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "id": 2,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "sum(active_tts_requests{namespace=\"builder-engine\"})", "refId": "A"}],
+          "title": "Active TTS Requests",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "id": 3,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "histogram_quantile(0.95, sum(rate(transcription_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le)) * 1000", "refId": "A"}],
+          "title": "P95 STT Latency (ms)",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "id": 4,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "histogram_quantile(0.95, sum(rate(tts_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le)) * 1000", "refId": "A"}],
+          "title": "P95 TTS Latency (ms)",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "id": 5,
+          "targets": [
+            {"expr": "sum(rate(transcription_requests_total{namespace=\"builder-engine\"}[5m])) by (provider)", "legendFormat": "{{provider}}", "refId": "A"}
+          ],
+          "title": "STT Request Rate by Provider",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "id": 6,
+          "targets": [
+            {"expr": "sum(rate(tts_requests_total{namespace=\"builder-engine\"}[5m])) by (provider)", "legendFormat": "{{provider}}", "refId": "A"}
+          ],
+          "title": "TTS Request Rate by Provider",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "id": 7,
+          "targets": [
+            {"expr": "histogram_quantile(0.50, sum(rate(transcription_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le, provider))", "legendFormat": "{{provider}} p50", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, sum(rate(transcription_duration_seconds_bucket{namespace=\"builder-engine\"}[5m])) by (le, provider))", "legendFormat": "{{provider}} p95", "refId": "B"}
+          ],
+          "title": "STT Latency by Provider",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "id": 8,
+          "targets": [
+            {"expr": "sum(rate(transcription_errors_total{namespace=\"builder-engine\"}[5m])) by (error_type)", "legendFormat": "{{error_type}}", "refId": "A"}
+          ],
+          "title": "STT Errors by Type",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+          "id": 9,
+          "targets": [
+            {"expr": "builder_engine:transcription_accuracy:ratio * 100", "legendFormat": "Accuracy %", "refId": "A"}
+          ],
+          "title": "Transcription Accuracy",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 38,
+      "tags": ["builder-engine", "voice"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Builder Engine - Voice Processing",
+      "uid": "builder-engine-voice",
+      "version": 1
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-infrastructure
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  builder-engine-infrastructure.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "panels": [
+        {
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "sum(kube_pod_status_ready{namespace=\"builder-engine\", condition=\"true\"})", "refId": "A"}],
+          "title": "Ready Pods",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+          "id": 2,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "sum(pg_stat_activity_count{datname=\"builderengine\"})", "refId": "A"}],
+          "title": "DB Connections",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+          "id": 3,
+          "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+          "targets": [{"expr": "redis_connected_clients", "refId": "A"}],
+          "title": "Redis Clients",
+          "type": "stat"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "id": 4,
+          "targets": [
+            {"expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"builder-engine\"}[5m])) by (pod)", "legendFormat": "{{pod}}", "refId": "A"}
+          ],
+          "title": "CPU Usage by Pod",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "id": 5,
+          "targets": [
+            {"expr": "sum(container_memory_working_set_bytes{namespace=\"builder-engine\"}) by (pod) / 1024 / 1024 / 1024", "legendFormat": "{{pod}}", "refId": "A"}
+          ],
+          "title": "Memory Usage by Pod (GB)",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 14},
+          "id": 6,
+          "targets": [
+            {"expr": "pg_stat_database_tup_fetched{datname=\"builderengine\"}", "legendFormat": "Fetched", "refId": "A"},
+            {"expr": "pg_stat_database_tup_inserted{datname=\"builderengine\"}", "legendFormat": "Inserted", "refId": "B"},
+            {"expr": "pg_stat_database_tup_updated{datname=\"builderengine\"}", "legendFormat": "Updated", "refId": "C"}
+          ],
+          "title": "PostgreSQL Operations",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 14},
+          "id": 7,
+          "targets": [
+            {"expr": "redis_memory_used_bytes / 1024 / 1024", "legendFormat": "Used (MB)", "refId": "A"},
+            {"expr": "redis_memory_max_bytes / 1024 / 1024", "legendFormat": "Max (MB)", "refId": "B"}
+          ],
+          "title": "Redis Memory",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 14},
+          "id": 8,
+          "targets": [
+            {"expr": "rabbitmq_queue_messages{namespace=\"builder-engine\"}", "legendFormat": "{{queue}}", "refId": "A"}
+          ],
+          "title": "RabbitMQ Queue Depths",
+          "type": "timeseries"
+        },
+        {
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 22},
+          "id": 9,
+          "targets": [
+            {"expr": "sum(rate(rabbitmq_queue_messages_published_total{namespace=\"builder-engine\"}[5m])) by (queue)", "legendFormat": "{{queue}}", "refId": "A"}
+          ],
+          "title": "RabbitMQ Message Rate by Queue",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "tags": ["builder-engine", "infrastructure"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Builder Engine - Infrastructure",
+      "uid": "builder-engine-infra",
+      "version": 1
+    }

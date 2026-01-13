@@ -1,0 +1,170 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-engine
+  namespace: builder-engine
+  labels:
+    app: voice-engine
+    tier: backend
+    version: v1
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: voice-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: voice-engine
+        tier: backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+    spec:
+      serviceAccountName: voice-engine-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: voice-engine
+          image: builderengine/voice-engine:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8001
+              protocol: TCP
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: voice-engine-config
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: api-secrets
+            - secretRef:
+                name: redis-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: audio-cache
+              mountPath: /app/cache/audio
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: audio-cache
+          emptyDir:
+            sizeLimit: 2Gi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: voice-engine
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-engine
+  namespace: builder-engine
+  labels:
+    app: voice-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: voice-engine
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: voice-engine-hpa
+  namespace: builder-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: voice-engine
+  minReplicas: 5
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 200
+          periodSeconds: 15
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: voice-engine-pdb
+  namespace: builder-engine
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: voice-engine
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: voice-engine-sa
+  namespace: builder-engine

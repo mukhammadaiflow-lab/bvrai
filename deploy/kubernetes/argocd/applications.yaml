@@ -1,0 +1,372 @@
+---
+# ArgoCD Application definitions for Builder Engine
+# GitOps deployment configuration
+
+# Root application (App of Apps pattern)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: builder-engine
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes
+    directory:
+      recurse: true
+      exclude: '{argocd/*,*.md}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: builder-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/minReplicas
+        - /spec/maxReplicas
+---
+# Platform API Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-api
+  namespace: argocd
+  labels:
+    app: platform-api
+    tier: backend
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes/deployments
+    kustomize:
+      images:
+        - builderengine/platform-api:latest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: builder-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+# Voice Engine Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: voice-engine
+  namespace: argocd
+  labels:
+    app: voice-engine
+    tier: backend
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes/deployments
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: builder-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+# Conversation Engine Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: conversation-engine
+  namespace: argocd
+  labels:
+    app: conversation-engine
+    tier: backend
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes/deployments
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: builder-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+# Dashboard Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dashboard
+  namespace: argocd
+  labels:
+    app: dashboard
+    tier: frontend
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes/deployments
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: builder-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+---
+# Infrastructure Applications
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infrastructure
+  namespace: argocd
+  labels:
+    tier: infrastructure
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes/infrastructure
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: builder-engine
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+---
+# Monitoring Stack Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  labels:
+    tier: monitoring
+spec:
+  project: builder-engine
+  source:
+    repoURL: https://github.com/builderengine/platform.git
+    targetRevision: HEAD
+    path: deploy/kubernetes/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# ArgoCD Project for Builder Engine
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: builder-engine
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Builder Engine Voice AI Platform
+  sourceRepos:
+    - https://github.com/builderengine/platform.git
+    - https://github.com/builderengine/*
+  destinations:
+    - namespace: builder-engine
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    - group: cert-manager.io
+      kind: ClusterIssuer
+    - group: storage.k8s.io
+      kind: StorageClass
+  namespaceResourceBlacklist:
+    - group: ''
+      kind: ResourceQuota
+    - group: ''
+      kind: LimitRange
+  roles:
+    - name: admin
+      description: Admin access to builder-engine project
+      policies:
+        - p, proj:builder-engine:admin, applications, *, builder-engine/*, allow
+        - p, proj:builder-engine:admin, repositories, *, builder-engine/*, allow
+      groups:
+        - platform-admins
+    - name: developer
+      description: Developer access - read and sync
+      policies:
+        - p, proj:builder-engine:developer, applications, get, builder-engine/*, allow
+        - p, proj:builder-engine:developer, applications, sync, builder-engine/*, allow
+      groups:
+        - platform-developers
+    - name: readonly
+      description: Read-only access
+      policies:
+        - p, proj:builder-engine:readonly, applications, get, builder-engine/*, allow
+      groups:
+        - platform-viewers
+  orphanedResources:
+    warn: true
+---
+# Rollout configuration for progressive delivery
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: platform-api-rollout
+  namespace: builder-engine
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+        - setWeight: 10
+        - pause: {duration: 2m}
+        - setWeight: 25
+        - pause: {duration: 2m}
+        - setWeight: 50
+        - pause: {duration: 5m}
+        - setWeight: 75
+        - pause: {duration: 5m}
+        - setWeight: 100
+      trafficRouting:
+        nginx:
+          stableIngress: platform-api-stable
+          annotationPrefix: nginx.ingress.kubernetes.io
+      analysis:
+        templates:
+          - templateName: success-rate
+        startingStep: 2
+        args:
+          - name: service-name
+            value: platform-api
+  selector:
+    matchLabels:
+      app: platform-api
+  template:
+    metadata:
+      labels:
+        app: platform-api
+    spec:
+      containers:
+        - name: platform-api
+          image: builderengine/platform-api:latest
+          ports:
+            - containerPort: 8000
+---
+# Analysis Template for canary deployments
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: builder-engine
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      interval: 1m
+      count: 5
+      successCondition: result[0] >= 0.95
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{service="{{args.service-name}}", status!~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}"}[5m]))
+    - name: latency-p95
+      interval: 1m
+      count: 5
+      successCondition: result[0] < 0.5
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}"}[5m])) by (le))
+---
+# Image Updater configuration
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: builder-engine-services
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - service: platform-api
+            path: deploy/kubernetes/deployments/platform-api.yaml
+          - service: voice-engine
+            path: deploy/kubernetes/deployments/voice-engine.yaml
+          - service: conversation-engine
+            path: deploy/kubernetes/deployments/conversation-engine.yaml
+          - service: dashboard
+            path: deploy/kubernetes/deployments/dashboard.yaml
+          - service: webrtc-gateway
+            path: deploy/kubernetes/deployments/webrtc-gateway.yaml
+  template:
+    metadata:
+      name: '{{service}}'
+      namespace: argocd
+      annotations:
+        argocd-image-updater.argoproj.io/image-list: 'app=builderengine/{{service}}'
+        argocd-image-updater.argoproj.io/app.update-strategy: semver
+        argocd-image-updater.argoproj.io/write-back-method: git
+    spec:
+      project: builder-engine
+      source:
+        repoURL: https://github.com/builderengine/platform.git
+        targetRevision: HEAD
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: builder-engine
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true

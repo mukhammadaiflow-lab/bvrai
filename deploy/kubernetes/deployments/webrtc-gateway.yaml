@@ -1,0 +1,179 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webrtc-gateway
+  namespace: builder-engine
+  labels:
+    app: webrtc-gateway
+    tier: backend
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webrtc-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: webrtc-gateway
+        tier: backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8003"
+    spec:
+      serviceAccountName: webrtc-gateway-sa
+      hostNetwork: false
+      containers:
+        - name: webrtc-gateway
+          image: builderengine/webrtc-gateway:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8003
+              protocol: TCP
+            - name: ws
+              containerPort: 8004
+              protocol: TCP
+            - name: rtc-udp
+              containerPort: 10000
+              protocol: UDP
+            - name: rtc-tcp
+              containerPort: 10000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: webrtc-gateway-config
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: redis-secrets
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: webrtc-gateway
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webrtc-gateway
+  namespace: builder-engine
+  labels:
+    app: webrtc-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app: webrtc-gateway
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003
+    - name: ws
+      port: 8004
+      targetPort: 8004
+---
+# LoadBalancer service for WebRTC media
+apiVersion: v1
+kind: Service
+metadata:
+  name: webrtc-gateway-media
+  namespace: builder-engine
+  labels:
+    app: webrtc-gateway
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: webrtc-gateway
+  ports:
+    - name: rtc-udp
+      port: 10000
+      targetPort: 10000
+      protocol: UDP
+    - name: rtc-tcp
+      port: 10000
+      targetPort: 10000
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: webrtc-gateway-hpa
+  namespace: builder-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webrtc-gateway
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: webrtc-gateway-pdb
+  namespace: builder-engine
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: webrtc-gateway
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webrtc-gateway-sa
+  namespace: builder-engine

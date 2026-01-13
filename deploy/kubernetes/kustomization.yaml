@@ -1,0 +1,92 @@
+# Kustomization for Builder Engine Kubernetes deployment
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: builder-engine
+
+namespace: builder-engine
+
+# Resources to include
+resources:
+  # Namespace and base configuration
+  - namespace.yaml
+  - configmaps.yaml
+  - secrets.yaml
+  - ingress.yaml
+
+  # Application deployments
+  - deployments/platform-api.yaml
+  - deployments/voice-engine.yaml
+  - deployments/conversation-engine.yaml
+  - deployments/dashboard.yaml
+  - deployments/webrtc-gateway.yaml
+  - deployments/workers.yaml
+
+  # Infrastructure
+  - infrastructure/postgresql.yaml
+  - infrastructure/redis.yaml
+  - infrastructure/rabbitmq.yaml
+
+  # Monitoring
+  - monitoring/prometheus.yaml
+  - monitoring/grafana-dashboards.yaml
+  - monitoring/logging.yaml
+
+  # ArgoCD
+  - argocd/applications.yaml
+
+# Common labels to apply
+commonLabels:
+  app.kubernetes.io/part-of: builder-engine
+  app.kubernetes.io/managed-by: kustomize
+
+# Common annotations
+commonAnnotations:
+  app.kubernetes.io/version: "1.0.0"
+
+# Image customization
+images:
+  - name: builderengine/platform-api
+    newTag: latest
+  - name: builderengine/voice-engine
+    newTag: latest
+  - name: builderengine/conversation-engine
+    newTag: latest
+  - name: builderengine/dashboard
+    newTag: latest
+  - name: builderengine/webrtc-gateway
+    newTag: latest
+  - name: builderengine/workers
+    newTag: latest
+
+# Config Map Generator (for dynamic config)
+configMapGenerator:
+  - name: deployment-info
+    literals:
+      - DEPLOY_TIME=PLACEHOLDER
+      - DEPLOY_COMMIT=PLACEHOLDER
+    options:
+      disableNameSuffixHash: true
+
+# Secret Generator (for generated secrets)
+secretGenerator: []
+
+# Patches for environment-specific overrides
+patches: []
+
+# Replica count overrides
+replicas:
+  - name: platform-api
+    count: 3
+  - name: voice-engine
+    count: 3
+  - name: conversation-engine
+    count: 3
+  - name: dashboard
+    count: 3
+  - name: webrtc-gateway
+    count: 3
+
+# Components to include (optional modular components)
+components: []

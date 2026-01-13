@@ -1,0 +1,155 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conversation-engine
+  namespace: builder-engine
+  labels:
+    app: conversation-engine
+    tier: backend
+    version: v1
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: conversation-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: conversation-engine
+        tier: backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+    spec:
+      serviceAccountName: conversation-engine-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: conversation-engine
+          image: builderengine/conversation-engine:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8002
+              protocol: TCP
+            - name: grpc
+              containerPort: 50052
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: conversation-engine-config
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: api-secrets
+            - secretRef:
+                name: redis-secrets
+            - secretRef:
+                name: database-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: conversation-engine
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: conversation-engine
+  namespace: builder-engine
+  labels:
+    app: conversation-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: conversation-engine
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
+    - name: grpc
+      port: 50052
+      targetPort: 50052
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: conversation-engine-hpa
+  namespace: builder-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: conversation-engine
+  minReplicas: 5
+  maxReplicas: 40
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: conversation-engine-pdb
+  namespace: builder-engine
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: conversation-engine
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: conversation-engine-sa
+  namespace: builder-engine
