@@ -1,0 +1,1031 @@
+openapi: 3.1.0
+info:
+  title: Builder Voice AI Platform API
+  description: |
+    REST API for the Builder Voice AI Platform.
+
+    ## Authentication
+
+    All API requests require authentication via API key or JWT token.
+
+    Include your API key in the `Authorization` header:
+    ```
+    Authorization: Bearer YOUR_API_KEY
+    ```
+
+    ## Rate Limiting
+
+    - Free tier: 100 requests/minute
+    - Starter tier: 500 requests/minute
+    - Professional tier: 2000 requests/minute
+    - Enterprise tier: Custom
+
+    ## Webhooks
+
+    Configure webhooks to receive real-time notifications about events.
+    See the Webhooks section for available events.
+
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@buildervoiceai.com
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.buildervoiceai.com/v1
+    description: Production
+  - url: https://staging-api.buildervoiceai.com/v1
+    description: Staging
+  - url: http://localhost:8086/api/v1
+    description: Local Development
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Agents
+    description: Voice agent management
+  - name: Voice Configuration
+    description: STT/TTS configuration
+  - name: Calls
+    description: Call management and history
+  - name: Analytics
+    description: Usage analytics and metrics
+  - name: Webhooks
+    description: Webhook management
+  - name: Billing
+    description: Subscription and billing
+
+paths:
+  # ==========================================================================
+  # Authentication
+  # ==========================================================================
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login
+      description: Authenticate with email and password
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get Current User
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  # ==========================================================================
+  # Agents
+  # ==========================================================================
+  /agents:
+    get:
+      tags: [Agents]
+      summary: List Agents
+      operationId: listAgents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, paused, archived]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAgents"
+
+    post:
+      tags: [Agents]
+      summary: Create Agent
+      operationId: createAgent
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+      responses:
+        "201":
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /agents/{agentId}:
+    get:
+      tags: [Agents]
+      summary: Get Agent
+      operationId: getAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      responses:
+        "200":
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    put:
+      tags: [Agents]
+      summary: Update Agent
+      operationId: updateAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAgentRequest"
+      responses:
+        "200":
+          description: Agent updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+
+    delete:
+      tags: [Agents]
+      summary: Delete Agent
+      operationId: deleteAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      responses:
+        "204":
+          description: Agent deleted
+
+  /agents/{agentId}/test:
+    post:
+      tags: [Agents]
+      summary: Test Agent
+      description: Send a test message to the agent and get a response
+      operationId: testAgent
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/agentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  maxLength: 1000
+      responses:
+        "200":
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  latency_ms:
+                    type: number
+
+  # ==========================================================================
+  # Voice Configuration
+  # ==========================================================================
+  /voice-configs:
+    get:
+      tags: [Voice Configuration]
+      summary: List Voice Configurations
+      operationId: listVoiceConfigs
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of voice configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VoiceConfiguration"
+
+    post:
+      tags: [Voice Configuration]
+      summary: Create Voice Configuration
+      operationId: createVoiceConfig
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVoiceConfigRequest"
+      responses:
+        "201":
+          description: Voice configuration created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceConfiguration"
+
+  /voices:
+    get:
+      tags: [Voice Configuration]
+      summary: List Available Voices
+      description: Get list of available TTS voices from all providers
+      operationId: listVoices
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            type: string
+            enum: [elevenlabs, playht, cartesia, openai, google, azure]
+        - name: language
+          in: query
+          schema:
+            type: string
+        - name: gender
+          in: query
+          schema:
+            type: string
+            enum: [male, female, neutral]
+      responses:
+        "200":
+          description: List of voices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Voice"
+
+  # ==========================================================================
+  # Calls
+  # ==========================================================================
+  /calls:
+    get:
+      tags: [Calls]
+      summary: List Calls
+      operationId: listCalls
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [initiated, ringing, in_progress, completed, failed]
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [inbound, outbound]
+        - name: from_date
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to_date
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: List of calls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedCalls"
+
+  /calls/outbound:
+    post:
+      tags: [Calls]
+      summary: Initiate Outbound Call
+      operationId: initiateOutboundCall
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id, to_number]
+              properties:
+                agent_id:
+                  type: string
+                to_number:
+                  type: string
+                  pattern: "^\\+[1-9]\\d{1,14}$"
+                metadata:
+                  type: object
+      responses:
+        "201":
+          description: Call initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Call"
+
+  /calls/{callId}:
+    get:
+      tags: [Calls]
+      summary: Get Call Details
+      operationId: getCall
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/callId"
+      responses:
+        "200":
+          description: Call details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Call"
+
+  /calls/{callId}/conversation:
+    get:
+      tags: [Calls]
+      summary: Get Call Conversation
+      description: Get the full conversation transcript for a call
+      operationId: getCallConversation
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/callId"
+      responses:
+        "200":
+          description: Conversation with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+
+  /calls/{callId}/hangup:
+    post:
+      tags: [Calls]
+      summary: Hangup Call
+      operationId: hangupCall
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/callId"
+      responses:
+        "204":
+          description: Call ended
+
+  # ==========================================================================
+  # Analytics
+  # ==========================================================================
+  /analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Get Analytics Summary
+      operationId: getAnalyticsSummary
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Analytics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+
+  /analytics/dashboard:
+    get:
+      tags: [Analytics]
+      summary: Get Dashboard Stats
+      operationId: getDashboardStats
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  # ==========================================================================
+  # Webhooks
+  # ==========================================================================
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List Webhooks
+      operationId: listWebhooks
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of webhooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Webhook"
+
+    post:
+      tags: [Webhooks]
+      summary: Create Webhook
+      operationId: createWebhook
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookRequest"
+      responses:
+        "201":
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+
+  /webhooks/{webhookId}/test:
+    post:
+      tags: [Webhooks]
+      summary: Test Webhook
+      operationId: testWebhook
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/webhookId"
+      responses:
+        "200":
+          description: Test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  response_status:
+                    type: integer
+
+  # ==========================================================================
+  # Billing
+  # ==========================================================================
+  /billing/plan:
+    get:
+      tags: [Billing]
+      summary: Get Current Plan
+      operationId: getCurrentPlan
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current plan and usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    type: string
+                  usage:
+                    $ref: "#/components/schemas/UsageSummary"
+
+  /billing/usage:
+    get:
+      tags: [Billing]
+      summary: Get Usage Details
+      operationId: getUsage
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Usage details
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UsageSummary"
+
+# =============================================================================
+# Components
+# =============================================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    agentId:
+      name: agentId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Agent ID
+
+    callId:
+      name: callId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Call ID
+
+    webhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Webhook ID
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, member, viewer]
+        created_at:
+          type: string
+          format: date-time
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        system_prompt:
+          type: string
+        voice_config_id:
+          type: string
+        llm_config:
+          $ref: "#/components/schemas/LLMConfig"
+        status:
+          type: string
+          enum: [draft, active, paused, archived]
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateAgentRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        system_prompt:
+          type: string
+        voice_config_id:
+          type: string
+        llm_config:
+          $ref: "#/components/schemas/LLMConfig"
+
+    UpdateAgentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        system_prompt:
+          type: string
+        voice_config_id:
+          type: string
+        llm_config:
+          $ref: "#/components/schemas/LLMConfig"
+        status:
+          type: string
+          enum: [draft, active, paused, archived]
+
+    LLMConfig:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic, groq, together]
+        model:
+          type: string
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        max_tokens:
+          type: integer
+
+    VoiceConfiguration:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        stt_provider:
+          type: string
+        stt_config:
+          type: object
+        tts_provider:
+          type: string
+        tts_config:
+          type: object
+        voice_id:
+          type: string
+        language:
+          type: string
+        speed:
+          type: number
+        pitch:
+          type: number
+
+    CreateVoiceConfigRequest:
+      type: object
+      required: [name, stt_provider, tts_provider]
+      properties:
+        name:
+          type: string
+        stt_provider:
+          type: string
+        stt_config:
+          type: object
+        tts_provider:
+          type: string
+        tts_config:
+          type: object
+        voice_id:
+          type: string
+
+    Voice:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        language:
+          type: string
+        gender:
+          type: string
+        preview_url:
+          type: string
+
+    Call:
+      type: object
+      properties:
+        id:
+          type: string
+        agent_id:
+          type: string
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        from_number:
+          type: string
+        to_number:
+          type: string
+        status:
+          type: string
+          enum: [initiated, ringing, in_progress, completed, failed]
+        duration_seconds:
+          type: integer
+        recording_url:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+        call_id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        audio_url:
+          type: string
+        latency_ms:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        is_active:
+          type: boolean
+        last_triggered_at:
+          type: string
+          format: date-time
+
+    CreateWebhookRequest:
+      type: object
+      required: [url, events]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+            enum:
+              - call.started
+              - call.ended
+              - call.failed
+              - conversation.message
+              - conversation.ended
+
+    AnalyticsSummary:
+      type: object
+      properties:
+        period:
+          type: string
+        total_calls:
+          type: integer
+        total_duration_minutes:
+          type: number
+        average_duration_seconds:
+          type: number
+        success_rate:
+          type: number
+        total_cost_cents:
+          type: integer
+
+    DashboardStats:
+      type: object
+      properties:
+        today:
+          type: object
+          properties:
+            total_calls:
+              type: integer
+            total_minutes:
+              type: number
+            active_calls:
+              type: integer
+            success_rate:
+              type: number
+        agents:
+          type: object
+          properties:
+            total:
+              type: integer
+            active:
+              type: integer
+
+    UsageSummary:
+      type: object
+      properties:
+        period:
+          type: string
+        calls:
+          type: integer
+        minutes:
+          type: number
+        stt_characters:
+          type: integer
+        tts_characters:
+          type: integer
+        llm_tokens:
+          type: integer
+        estimated_cost_cents:
+          type: integer
+
+    PaginatedAgents:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_pages:
+          type: integer
+
+    PaginatedCalls:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Call"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total_pages:
+          type: integer

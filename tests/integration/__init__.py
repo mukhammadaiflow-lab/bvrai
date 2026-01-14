@@ -1,1 +1,1 @@
-"""Integration tests."""
+"""Integration tests for the Builder Voice AI Platform."""
