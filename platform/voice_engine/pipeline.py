@@ -586,14 +586,18 @@ class VoicePipeline:
 
         if self.config.input_format.sample_rate != internal_format.sample_rate:
             self._input_resampler = AudioResampler(
-                source_format=self.config.input_format,
-                target_format=internal_format,
+                input_rate=self.config.input_format.sample_rate,
+                output_rate=internal_format.sample_rate,
+                channels=self.config.input_format.channels,
+                sample_width=self.config.input_format.sample_width,
             )
 
         if self.config.output_format.sample_rate != internal_format.sample_rate:
             self._output_resampler = AudioResampler(
-                source_format=internal_format,
-                target_format=self.config.output_format,
+                input_rate=internal_format.sample_rate,
+                output_rate=self.config.output_format.sample_rate,
+                channels=internal_format.channels,
+                sample_width=internal_format.sample_width,
             )
 
     async def _cleanup_components(self) -> None:

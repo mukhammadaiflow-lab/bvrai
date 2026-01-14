@@ -8,6 +8,7 @@ This module provides sophisticated context window management including:
 - Conversation summarization
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -26,6 +27,73 @@ from .base import (
     ModelInfo,
     get_model_info,
 )
+
+
+# Try to import tiktoken for accurate token counting
+_tiktoken_available = False
+_tiktoken_encodings = {}
+try:
+    import tiktoken
+    _tiktoken_available = True
+except ImportError:
+    pass
+
+
+def estimate_tokens(text: str, model: str = "gpt-4") -> int:
+    """
+    Estimate token count for text.
+
+    Uses tiktoken for accurate counting when available,
+    falls back to a character-based heuristic.
+
+    Args:
+        text: The text to count tokens for
+        model: The model to use for encoding (affects tokenization)
+
+    Returns:
+        Estimated token count
+    """
+    if not text:
+        return 0
+
+    if _tiktoken_available:
+        try:
+            # Get or create encoding for this model
+            if model not in _tiktoken_encodings:
+                try:
+                    _tiktoken_encodings[model] = tiktoken.encoding_for_model(model)
+                except KeyError:
+                    # Fall back to cl100k_base for unknown models
+                    _tiktoken_encodings[model] = tiktoken.get_encoding("cl100k_base")
+
+            encoding = _tiktoken_encodings[model]
+            return len(encoding.encode(text))
+        except Exception:
+            pass  # Fall through to estimation
+
+    # Improved character-based estimation
+    # Average ratio varies by language and content type:
+    # - English prose: ~4 chars/token
+    # - Code: ~3 chars/token
+    # - CJK languages: ~1.5 chars/token
+
+    # Detect if text contains significant CJK characters
+    cjk_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff'
+                    or '\u3040' <= c <= '\u309f'  # Hiragana
+                    or '\u30a0' <= c <= '\u30ff')  # Katakana
+
+    if cjk_count > len(text) * 0.3:
+        # Significant CJK content
+        return int(len(text) / 1.5) + 1
+
+    # Check for code-like content (common programming symbols)
+    code_indicators = sum(1 for c in text if c in '{}[]();=<>/')
+    if code_indicators > len(text) * 0.05:
+        # Likely code
+        return int(len(text) / 3) + 1
+
+    # Default: English prose
+    return int(len(text) / 4) + 1
 
 
 logger = logging.getLogger(__name__)
@@ -147,8 +215,7 @@ class ContextWindow:
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count for text."""
-        # Simple estimation: ~4 characters per token
-        return len(text) // 4 + 1
+        return estimate_tokens(text)
 
 
 class ContextManager:
@@ -408,7 +475,7 @@ class ContextManager:
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count."""
-        return len(text) // 4 + 1
+        return estimate_tokens(text, self.model_id)
 
     def clear_history(self) -> None:
         """Clear conversation history but keep system prompts."""
@@ -517,7 +584,23 @@ Summary:"""
         return response.content
 
     def summarize(messages: List[LLMMessage]) -> str:
-        return asyncio.run(summarize_async(messages))
+        """
+        Synchronous wrapper for summarize_async.
+
+        Handles the case when called from an already running event loop.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop running - safe to use asyncio.run
+            return asyncio.run(summarize_async(messages))
+
+        # Event loop is running - need to handle differently
+        # Create a new thread to run the coroutine
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, summarize_async(messages))
+            return future.result()
 
     return summarize
 
@@ -529,4 +612,5 @@ __all__ = [
     "ContextWindow",
     "ContextManager",
     "create_conversation_summarizer",
+    "estimate_tokens",
 ]

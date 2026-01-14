@@ -521,12 +521,17 @@ class SessionPool:
 
         Args:
             session: Updated session
+
+        Note: Both in-memory cache and storage are updated atomically
+              to prevent race conditions between concurrent updates.
         """
         async with self._lock:
             if session.id in self._active_sessions:
                 self._active_sessions[session.id] = session
-
-        await self.storage.save(session)
+            # Save to storage within the lock to ensure atomic updates
+            # This prevents race conditions where a concurrent update
+            # could overwrite newer data with stale data
+            await self.storage.save(session)
 
     async def list_active(
         self,

@@ -592,9 +592,30 @@ class BaseLLMProvider(ABC):
         return get_model_info(model_id)
 
     def estimate_tokens(self, text: str) -> int:
-        """Estimate token count for text."""
-        # Simple estimation: ~4 characters per token for English
-        return len(text) // 4
+        """
+        Estimate token count for text.
+
+        Uses improved heuristics based on content type.
+        For accurate counting, use tiktoken library directly.
+        """
+        if not text:
+            return 0
+
+        # Detect CJK content (more tokens per character)
+        cjk_count = sum(1 for c in text if '\u4e00' <= c <= '\u9fff'
+                        or '\u3040' <= c <= '\u309f'
+                        or '\u30a0' <= c <= '\u30ff')
+
+        if cjk_count > len(text) * 0.3:
+            return int(len(text) / 1.5) + 1
+
+        # Check for code (uses fewer chars per token)
+        code_chars = sum(1 for c in text if c in '{}[]();=<>/')
+        if code_chars > len(text) * 0.05:
+            return int(len(text) / 3) + 1
+
+        # Default English text
+        return int(len(text) / 4) + 1
 
 
 __all__ = [

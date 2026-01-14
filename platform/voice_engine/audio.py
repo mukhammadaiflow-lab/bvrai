@@ -199,7 +199,8 @@ class AudioChunk:
 
         # Max value for sample width
         max_val = (2 ** (self.format.sample_width * 8 - 1)) - 1
-        return 20 * (rms / max_val + 1e-10).__log10__() if rms > 0 else -100.0
+        import math
+        return 20 * math.log10(rms / max_val + 1e-10) if rms > 0 else -100.0
 
     def to_base64(self) -> str:
         """Encode audio data as base64."""
