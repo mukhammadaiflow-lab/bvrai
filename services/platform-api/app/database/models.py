@@ -38,6 +38,7 @@ class AgentStatus(str, PyEnum):
 
 class CallStatus(str, PyEnum):
     """Call status."""
+    QUEUED = "queued"
     INITIATED = "initiated"
     RINGING = "ringing"
     IN_PROGRESS = "in_progress"
@@ -45,6 +46,7 @@ class CallStatus(str, PyEnum):
     FAILED = "failed"
     NO_ANSWER = "no_answer"
     BUSY = "busy"
+    CANCELLED = "cancelled"
 
 
 class CallDirection(str, PyEnum):
@@ -80,8 +82,10 @@ class APIKey(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     key_hash = Column(String(255), nullable=False, unique=True, index=True)
     name = Column(String(255), nullable=False)
+    scopes = Column(JSON, default=list)  # API key scopes/permissions
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))  # When the key was revoked
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True))
@@ -151,7 +155,8 @@ class Call(Base):
 
     # Call identifiers
     session_id = Column(String(100), unique=True, index=True)
-    external_id = Column(String(100))  # Twilio Call SID
+    external_id = Column(String(100))  # External provider ID (legacy)
+    twilio_call_sid = Column(String(100), index=True)  # Twilio Call SID
 
     # Call info
     direction = Column(Enum(CallDirection), nullable=False)
@@ -193,16 +198,20 @@ class Call(Base):
 
 
 class CallLog(Base):
-    """Call log entry for conversation turns."""
+    """Call log entry for conversation turns and events."""
     __tablename__ = "call_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     call_id = Column(UUID(as_uuid=True), ForeignKey("calls.id"), nullable=False)
 
-    # Turn info
-    turn_number = Column(Integer, nullable=False)
-    role = Column(String(20), nullable=False)  # user, assistant, system
-    content = Column(Text, nullable=False)
+    # Event info
+    event_type = Column(String(50), nullable=False, index=True)  # speech, action, system, etc.
+    speaker = Column(String(50))  # user, agent, system
+
+    # Turn info (for conversation entries)
+    turn_number = Column(Integer)
+    role = Column(String(20))  # user, assistant, system (legacy)
+    content = Column(Text)
 
     # Timing
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
@@ -217,12 +226,16 @@ class CallLog(Base):
     function_call = Column(JSON)
     function_result = Column(JSON)
 
+    # Additional metadata
+    metadata = Column(JSON, default=dict)
+
     # Relationships
     call = relationship("Call", back_populates="logs")
 
     # Indexes
     __table_args__ = (
         Index("ix_call_logs_call_turn", "call_id", "turn_number"),
+        Index("ix_call_logs_event_type", "call_id", "event_type"),
     )
 
 
@@ -253,3 +266,133 @@ class KnowledgeBase(Base):
 
     # Relationships
     agent = relationship("Agent", back_populates="knowledge_bases")
+
+
+class UsageRecord(Base):
+    """Usage tracking for billing and analytics."""
+    __tablename__ = "usage_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    # Usage type
+    usage_type = Column(String(50), nullable=False)  # api_call, llm_tokens, tts_chars, asr_minutes, storage_mb
+
+    # Usage amount
+    amount = Column(Integer, nullable=False, default=0)
+    unit = Column(String(20), nullable=False)  # count, tokens, chars, minutes, mb
+
+    # Context
+    resource_type = Column(String(50))  # call, agent, knowledge_base
+    resource_id = Column(UUID(as_uuid=True))
+
+    # Details
+    details = Column(JSON, default=dict)
+
+    # Timestamp
+    recorded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Indexes
+    __table_args__ = (
+        Index("ix_usage_user_type_date", "user_id", "usage_type", "recorded_at"),
+        Index("ix_usage_recorded_at", "recorded_at"),
+    )
+
+
+class AuditEventModel(Base):
+    """Audit event storage for compliance and security."""
+    __tablename__ = "audit_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id = Column(String(36), unique=True, nullable=False, index=True)
+
+    # Event classification
+    event_type = Column(String(100), nullable=False, index=True)
+    severity = Column(String(20), nullable=False)
+
+    # Actor and action
+    actor_id = Column(String(255), index=True)
+    action = Column(Text, nullable=False)
+    outcome = Column(String(20), nullable=False)  # success, failure, error
+
+    # Resource
+    resource_type = Column(String(100))
+    resource_id = Column(String(255))
+
+    # Context
+    request_id = Column(String(100))
+    session_id = Column(String(100))
+    tenant_id = Column(String(100), index=True)
+    ip_address = Column(String(45))
+    user_agent = Column(Text)
+    correlation_id = Column(String(100))
+
+    # Details
+    details = Column(JSON, default=dict)
+
+    # Hash chain for tamper detection
+    previous_hash = Column(String(64))
+    event_hash = Column(String(64), nullable=False)
+
+    # Timestamp
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Indexes
+    __table_args__ = (
+        Index("ix_audit_type_timestamp", "event_type", "timestamp"),
+        Index("ix_audit_actor_timestamp", "actor_id", "timestamp"),
+        Index("ix_audit_resource", "resource_type", "resource_id"),
+    )
+
+
+class ResponseTimeLog(Base):
+    """Track response times for analytics."""
+    __tablename__ = "response_time_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    call_id = Column(UUID(as_uuid=True), ForeignKey("calls.id"), nullable=False)
+
+    # Timing breakdown
+    asr_latency_ms = Column(Integer)  # Speech-to-text time
+    llm_latency_ms = Column(Integer)  # LLM response time
+    tts_latency_ms = Column(Integer)  # Text-to-speech time
+    total_latency_ms = Column(Integer)  # Total round-trip
+
+    # Turn info
+    turn_number = Column(Integer)
+
+    # Timestamp
+    recorded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Indexes
+    __table_args__ = (
+        Index("ix_response_call_turn", "call_id", "turn_number"),
+        Index("ix_response_recorded", "recorded_at"),
+    )
+
+
+class QueueWaitTime(Base):
+    """Track call queue wait times."""
+    __tablename__ = "queue_wait_times"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    call_id = Column(UUID(as_uuid=True), ForeignKey("calls.id"), nullable=False)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=False)
+
+    # Wait time in seconds
+    wait_time_seconds = Column(Integer, nullable=False)
+
+    # Queue position when entered
+    initial_position = Column(Integer)
+
+    # Timestamps
+    entered_queue_at = Column(DateTime(timezone=True), nullable=False)
+    exited_queue_at = Column(DateTime(timezone=True))
+
+    # Outcome
+    outcome = Column(String(50))  # answered, abandoned, transferred
+
+    # Index
+    __table_args__ = (
+        Index("ix_queue_agent_entered", "agent_id", "entered_queue_at"),
+    )

@@ -587,6 +587,39 @@ class SalesforceProvider(CRMProvider):
         deal.external_id = result.get("id", "")
         return deal
 
+    async def update_deal(
+        self,
+        deal_id: str,
+        updates: Dict[str, Any],
+    ) -> ExternalDeal:
+        """Update an opportunity in Salesforce."""
+        data = {}
+
+        # Map common fields to Salesforce fields
+        field_mapping = {
+            "name": "Name",
+            "stage": "StageName",
+            "amount": "Amount",
+            "close_date": "CloseDate",
+            "probability": "Probability",
+            "description": "Description",
+            "contact_id": "ContactId",
+            "company_id": "AccountId",
+        }
+
+        for key, value in updates.items():
+            sf_field = field_mapping.get(key, key)
+            if key == "close_date" and value:
+                data[sf_field] = value.strftime("%Y-%m-%d") if hasattr(value, 'strftime') else value
+            else:
+                data[sf_field] = value
+
+        await self._make_request("PATCH", f"/sobjects/Opportunity/{deal_id}", json=data)
+
+        # Fetch updated deal
+        result = await self._make_request("GET", f"/sobjects/Opportunity/{deal_id}")
+        return self._opportunity_to_deal(result)
+
     async def find_contact_by_phone(self, phone: str) -> Optional[ExternalContact]:
         """Find a contact by phone number."""
         # Normalize phone for search

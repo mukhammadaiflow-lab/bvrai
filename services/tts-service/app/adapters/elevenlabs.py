@@ -270,6 +270,317 @@ class ElevenLabsAdapter(TTSAdapter):
             await self._client.aclose()
             self._client = None
 
+    # Voice Cloning Methods
+
+    async def clone_voice(
+        self,
+        name: str,
+        audio_files: list[bytes],
+        description: str = "",
+        labels: Optional[dict] = None,
+    ) -> VoiceInfo:
+        """
+        Create a cloned voice from audio samples.
+
+        Args:
+            name: Name for the cloned voice
+            audio_files: List of audio file bytes (WAV, MP3, etc.)
+            description: Optional description of the voice
+            labels: Optional labels (e.g., {"accent": "american", "gender": "male"})
+
+        Returns:
+            VoiceInfo for the newly created voice
+
+        Notes:
+            - Requires at least 1 audio sample
+            - Best results with 3+ samples of 30+ seconds each
+            - Audio should be clear speech without background noise
+        """
+        if not audio_files:
+            raise ValueError("At least one audio file is required for voice cloning")
+
+        client = await self._get_client()
+
+        # Build multipart form data
+        files = []
+        for i, audio_data in enumerate(audio_files):
+            files.append(("files", (f"sample_{i}.mp3", audio_data, "audio/mpeg")))
+
+        data = {
+            "name": name,
+            "description": description,
+        }
+
+        if labels:
+            data["labels"] = str(labels)
+
+        try:
+            # Remove content-type header for multipart
+            headers = {
+                "xi-api-key": self.api_key,
+            }
+
+            response = await client.post(
+                "/voices/add",
+                data=data,
+                files=files,
+                headers=headers,
+            )
+            response.raise_for_status()
+
+            result = response.json()
+
+            self.logger.info(
+                "Voice cloned successfully",
+                voice_id=result.get("voice_id"),
+                name=name,
+            )
+
+            return VoiceInfo(
+                voice_id=result["voice_id"],
+                name=name,
+                description=description,
+                labels=labels,
+            )
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to clone voice", error=str(e))
+            raise
+
+    async def clone_voice_instant(
+        self,
+        name: str,
+        audio_files: list[bytes],
+        description: str = "",
+    ) -> VoiceInfo:
+        """
+        Create an instant voice clone (faster, less samples needed).
+
+        This uses ElevenLabs' instant voice cloning which requires
+        only a short sample but may have slightly lower quality.
+
+        Args:
+            name: Name for the cloned voice
+            audio_files: List of audio file bytes (can be just one)
+            description: Optional description
+
+        Returns:
+            VoiceInfo for the newly created voice
+        """
+        return await self.clone_voice(
+            name=name,
+            audio_files=audio_files,
+            description=description,
+        )
+
+    async def delete_voice(self, voice_id: str) -> bool:
+        """
+        Delete a cloned voice.
+
+        Args:
+            voice_id: ID of the voice to delete
+
+        Returns:
+            True if deletion was successful
+        """
+        client = await self._get_client()
+
+        try:
+            response = await client.delete(f"/voices/{voice_id}")
+            response.raise_for_status()
+
+            self.logger.info("Voice deleted", voice_id=voice_id)
+            return True
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to delete voice", voice_id=voice_id, error=str(e))
+            raise
+
+    async def edit_voice(
+        self,
+        voice_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        labels: Optional[dict] = None,
+    ) -> VoiceInfo:
+        """
+        Edit a cloned voice's metadata.
+
+        Args:
+            voice_id: ID of the voice to edit
+            name: New name (optional)
+            description: New description (optional)
+            labels: New labels (optional)
+
+        Returns:
+            Updated VoiceInfo
+        """
+        client = await self._get_client()
+
+        data = {}
+        if name:
+            data["name"] = name
+        if description:
+            data["description"] = description
+        if labels:
+            data["labels"] = str(labels)
+
+        try:
+            response = await client.post(
+                f"/voices/{voice_id}/edit",
+                data=data,
+            )
+            response.raise_for_status()
+
+            # Get updated voice info
+            return await self.get_voice(voice_id)
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to edit voice", voice_id=voice_id, error=str(e))
+            raise
+
+    async def get_voice(self, voice_id: str) -> VoiceInfo:
+        """
+        Get information about a specific voice.
+
+        Args:
+            voice_id: ID of the voice
+
+        Returns:
+            VoiceInfo for the voice
+        """
+        client = await self._get_client()
+
+        try:
+            response = await client.get(f"/voices/{voice_id}")
+            response.raise_for_status()
+
+            voice = response.json()
+
+            return VoiceInfo(
+                voice_id=voice["voice_id"],
+                name=voice["name"],
+                description=voice.get("description"),
+                labels=voice.get("labels"),
+                preview_url=voice.get("preview_url"),
+            )
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to get voice", voice_id=voice_id, error=str(e))
+            raise
+
+    async def add_voice_samples(
+        self,
+        voice_id: str,
+        audio_files: list[bytes],
+    ) -> VoiceInfo:
+        """
+        Add additional audio samples to an existing cloned voice.
+
+        Args:
+            voice_id: ID of the voice to add samples to
+            audio_files: List of audio file bytes
+
+        Returns:
+            Updated VoiceInfo
+        """
+        if not audio_files:
+            raise ValueError("At least one audio file is required")
+
+        client = await self._get_client()
+
+        files = []
+        for i, audio_data in enumerate(audio_files):
+            files.append(("files", (f"sample_{i}.mp3", audio_data, "audio/mpeg")))
+
+        try:
+            headers = {
+                "xi-api-key": self.api_key,
+            }
+
+            response = await client.post(
+                f"/voices/{voice_id}/edit",
+                files=files,
+                headers=headers,
+            )
+            response.raise_for_status()
+
+            self.logger.info("Voice samples added", voice_id=voice_id, count=len(audio_files))
+
+            return await self.get_voice(voice_id)
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to add voice samples", voice_id=voice_id, error=str(e))
+            raise
+
+    async def get_voice_settings(self, voice_id: str) -> dict:
+        """
+        Get the voice settings for a specific voice.
+
+        Args:
+            voice_id: ID of the voice
+
+        Returns:
+            Voice settings dict
+        """
+        client = await self._get_client()
+
+        try:
+            response = await client.get(f"/voices/{voice_id}/settings")
+            response.raise_for_status()
+
+            return response.json()
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to get voice settings", voice_id=voice_id, error=str(e))
+            raise
+
+    async def update_voice_settings(
+        self,
+        voice_id: str,
+        stability: Optional[float] = None,
+        similarity_boost: Optional[float] = None,
+        style: Optional[float] = None,
+        use_speaker_boost: Optional[bool] = None,
+    ) -> dict:
+        """
+        Update the default settings for a voice.
+
+        Args:
+            voice_id: ID of the voice
+            stability: Voice stability (0.0 - 1.0)
+            similarity_boost: Similarity enhancement (0.0 - 1.0)
+            style: Style exaggeration (0.0 - 1.0)
+            use_speaker_boost: Enable speaker boost
+
+        Returns:
+            Updated settings dict
+        """
+        client = await self._get_client()
+
+        data = {}
+        if stability is not None:
+            data["stability"] = stability
+        if similarity_boost is not None:
+            data["similarity_boost"] = similarity_boost
+        if style is not None:
+            data["style"] = style
+        if use_speaker_boost is not None:
+            data["use_speaker_boost"] = use_speaker_boost
+
+        try:
+            response = await client.post(
+                f"/voices/{voice_id}/settings/edit",
+                json=data,
+            )
+            response.raise_for_status()
+
+            return response.json()
+
+        except httpx.HTTPError as e:
+            self.logger.error("Failed to update voice settings", voice_id=voice_id, error=str(e))
+            raise
+
 
 def pcm_to_mulaw(pcm_data: bytes) -> bytes:
     """Convert PCM16 audio to μ-law encoding."""

@@ -695,6 +695,42 @@ class HubSpotProvider(CRMProvider):
 
         return deal
 
+    async def update_deal(
+        self,
+        deal_id: str,
+        updates: Dict[str, Any],
+    ) -> ExternalDeal:
+        """Update a deal in HubSpot."""
+        properties = {}
+
+        # Map common fields to HubSpot properties
+        field_mapping = {
+            "name": "dealname",
+            "stage": "dealstage",
+            "amount": "amount",
+            "close_date": "closedate",
+            "pipeline": "pipeline",
+            "probability": "hs_deal_stage_probability",
+            "description": "description",
+        }
+
+        for key, value in updates.items():
+            hs_field = field_mapping.get(key, key)
+            if key == "close_date" and value:
+                properties[hs_field] = value.strftime("%Y-%m-%d") if hasattr(value, 'strftime') else value
+            elif key == "amount":
+                properties[hs_field] = str(value) if value else None
+            else:
+                properties[hs_field] = value
+
+        result = await self._make_request(
+            "PATCH",
+            f"/crm/v3/objects/deals/{deal_id}",
+            json={"properties": properties},
+        )
+
+        return self._deal_to_external(result)
+
     async def find_contact_by_phone(self, phone: str) -> Optional[ExternalContact]:
         """Find a contact by phone number."""
         normalized = phone.replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")

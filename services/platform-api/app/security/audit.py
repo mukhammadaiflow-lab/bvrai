@@ -290,6 +290,121 @@ class InMemoryAuditStore(AuditStore):
         return results
 
 
+class DatabaseAuditStore(AuditStore):
+    """
+    PostgreSQL-based audit store for production use.
+
+    Stores audit events in the database with proper indexing
+    for efficient search and compliance reporting.
+    """
+
+    def __init__(self, session_factory):
+        """
+        Initialize with SQLAlchemy async session factory.
+
+        Args:
+            session_factory: Async session factory from database setup
+        """
+        self._session_factory = session_factory
+        self._lock = asyncio.Lock()
+
+    async def store(self, event: AuditEvent) -> None:
+        """Store audit event in database."""
+        from app.database.models import AuditEventModel
+
+        async with self._lock:
+            async with self._session_factory() as session:
+                db_event = AuditEventModel(
+                    event_id=event.event_id,
+                    event_type=event.event_type.value,
+                    severity=event.severity.value,
+                    actor_id=event.actor,
+                    action=event.action,
+                    outcome=event.outcome,
+                    resource_type=event.resource_type,
+                    resource_id=event.resource_id,
+                    request_id=event.context.request_id,
+                    session_id=event.context.session_id,
+                    tenant_id=event.context.tenant_id,
+                    ip_address=event.context.ip_address,
+                    user_agent=event.context.user_agent,
+                    correlation_id=event.context.correlation_id,
+                    details=event.details,
+                    previous_hash=event.previous_hash,
+                    event_hash=event.hash,
+                    timestamp=event.timestamp,
+                )
+                session.add(db_event)
+                await session.commit()
+
+    async def search(
+        self,
+        event_types: Optional[List[AuditEventType]] = None,
+        actor: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 100,
+    ) -> List[AuditEvent]:
+        """Search audit events in database."""
+        from sqlalchemy import select, and_
+        from app.database.models import AuditEventModel
+
+        async with self._session_factory() as session:
+            conditions = []
+
+            if event_types:
+                type_values = [t.value for t in event_types]
+                conditions.append(AuditEventModel.event_type.in_(type_values))
+            if actor:
+                conditions.append(AuditEventModel.actor_id == actor)
+            if resource_type:
+                conditions.append(AuditEventModel.resource_type == resource_type)
+            if resource_id:
+                conditions.append(AuditEventModel.resource_id == resource_id)
+            if start_time:
+                conditions.append(AuditEventModel.timestamp >= start_time)
+            if end_time:
+                conditions.append(AuditEventModel.timestamp <= end_time)
+
+            query = (
+                select(AuditEventModel)
+                .where(and_(*conditions) if conditions else True)
+                .order_by(AuditEventModel.timestamp.desc())
+                .limit(limit)
+            )
+
+            result = await session.execute(query)
+            rows = result.scalars().all()
+
+            return [
+                AuditEvent(
+                    event_id=row.event_id,
+                    event_type=AuditEventType(row.event_type),
+                    timestamp=row.timestamp,
+                    severity=AuditSeverity(row.severity),
+                    actor=row.actor_id,
+                    action=row.action,
+                    resource_type=row.resource_type,
+                    resource_id=row.resource_id,
+                    outcome=row.outcome,
+                    context=AuditContext(
+                        request_id=row.request_id,
+                        session_id=row.session_id,
+                        tenant_id=row.tenant_id,
+                        ip_address=row.ip_address,
+                        user_agent=row.user_agent,
+                        correlation_id=row.correlation_id,
+                    ),
+                    details=row.details or {},
+                    previous_hash=row.previous_hash,
+                    hash=row.event_hash,
+                )
+                for row in rows
+            ]
+
+
 class FileAuditStore(AuditStore):
     """File-based audit store with rotation."""
 

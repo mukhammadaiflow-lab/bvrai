@@ -218,39 +218,405 @@ class MockLLMAdapter(LLMAdapter):
         return True
 
 
-# TODO: Implement OpenAI adapter
-# class OpenAIAdapter(LLMAdapter):
-#     """
-#     OpenAI LLM adapter using the openai Python client.
-#
-#     Usage:
-#         from openai import AsyncOpenAI
-#         client = AsyncOpenAI(api_key=settings.openai_api_key)
-#         response = await client.chat.completions.create(
-#             model=settings.llm_model,
-#             messages=[{"role": m.role, "content": m.content} for m in messages],
-#             max_tokens=max_tokens,
-#             temperature=temperature,
-#         )
-#     """
-#     pass
+class OpenAIAdapter(LLMAdapter):
+    """
+    OpenAI LLM adapter using the openai Python client.
+
+    Supports GPT-4, GPT-4-turbo, GPT-3.5-turbo, and other OpenAI models.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4-turbo-preview",
+        organization: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.organization = organization
+        self.base_url = base_url
+        self._client = None
+
+    def _get_client(self):
+        """Get or create the OpenAI client."""
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+                self._client = AsyncOpenAI(
+                    api_key=self.api_key,
+                    organization=self.organization,
+                    base_url=self.base_url,
+                )
+            except ImportError:
+                raise RuntimeError("openai package not installed. Run: pip install openai")
+        return self._client
+
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        stop_sequences: list[str] | None = None,
+    ) -> LLMResponse:
+        """Generate a completion using OpenAI."""
+        client = self._get_client()
+
+        # Convert messages to OpenAI format
+        openai_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
+
+        try:
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=openai_messages,
+                max_tokens=max_tokens or 1024,
+                temperature=temperature if temperature is not None else 0.7,
+                stop=stop_sequences,
+            )
+
+            choice = response.choices[0]
+            usage = response.usage
+
+            logger.debug(
+                "openai_completion",
+                model=self.model,
+                tokens=usage.total_tokens if usage else 0,
+                finish_reason=choice.finish_reason,
+            )
+
+            return LLMResponse(
+                text=choice.message.content or "",
+                finish_reason=choice.finish_reason or "stop",
+                usage={
+                    "prompt_tokens": usage.prompt_tokens if usage else 0,
+                    "completion_tokens": usage.completion_tokens if usage else 0,
+                    "total_tokens": usage.total_tokens if usage else 0,
+                },
+                model=response.model,
+            )
+
+        except Exception as e:
+            logger.error("openai_error", error=str(e))
+            raise
+
+    async def is_available(self) -> bool:
+        """Check if OpenAI API is available."""
+        try:
+            client = self._get_client()
+            # Simple models list check
+            await client.models.list()
+            return True
+        except Exception as e:
+            logger.warning("openai_unavailable", error=str(e))
+            return False
 
 
-# TODO: Implement Anthropic adapter
-# class AnthropicAdapter(LLMAdapter):
-#     """
-#     Anthropic Claude adapter using the anthropic Python client.
-#
-#     Usage:
-#         from anthropic import AsyncAnthropic
-#         client = AsyncAnthropic(api_key=settings.anthropic_api_key)
-#         response = await client.messages.create(
-#             model=settings.llm_model,
-#             max_tokens=max_tokens,
-#             messages=[{"role": m.role, "content": m.content} for m in messages],
-#         )
-#     """
-#     pass
+class AnthropicAdapter(LLMAdapter):
+    """
+    Anthropic Claude adapter using the anthropic Python client.
+
+    Supports Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku, and other models.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "claude-3-5-sonnet-20241022",
+        base_url: str | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url
+        self._client = None
+
+    def _get_client(self):
+        """Get or create the Anthropic client."""
+        if self._client is None:
+            try:
+                from anthropic import AsyncAnthropic
+                kwargs = {"api_key": self.api_key}
+                if self.base_url:
+                    kwargs["base_url"] = self.base_url
+                self._client = AsyncAnthropic(**kwargs)
+            except ImportError:
+                raise RuntimeError("anthropic package not installed. Run: pip install anthropic")
+        return self._client
+
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        stop_sequences: list[str] | None = None,
+    ) -> LLMResponse:
+        """Generate a completion using Anthropic Claude."""
+        client = self._get_client()
+
+        # Extract system message if present
+        system_message = None
+        chat_messages = []
+        for msg in messages:
+            if msg.role == "system":
+                system_message = msg.content
+            else:
+                chat_messages.append({
+                    "role": msg.role,
+                    "content": msg.content,
+                })
+
+        try:
+            kwargs = {
+                "model": self.model,
+                "max_tokens": max_tokens or 1024,
+                "messages": chat_messages,
+            }
+
+            if system_message:
+                kwargs["system"] = system_message
+            if temperature is not None:
+                kwargs["temperature"] = temperature
+            if stop_sequences:
+                kwargs["stop_sequences"] = stop_sequences
+
+            response = await client.messages.create(**kwargs)
+
+            # Extract text from response
+            text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text += block.text
+
+            logger.debug(
+                "anthropic_completion",
+                model=self.model,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+                stop_reason=response.stop_reason,
+            )
+
+            return LLMResponse(
+                text=text,
+                finish_reason=response.stop_reason or "end_turn",
+                usage={
+                    "prompt_tokens": response.usage.input_tokens,
+                    "completion_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                },
+                model=response.model,
+            )
+
+        except Exception as e:
+            logger.error("anthropic_error", error=str(e))
+            raise
+
+    async def is_available(self) -> bool:
+        """Check if Anthropic API is available."""
+        try:
+            client = self._get_client()
+            # Try a minimal request
+            await client.messages.create(
+                model=self.model,
+                max_tokens=1,
+                messages=[{"role": "user", "content": "test"}],
+            )
+            return True
+        except Exception as e:
+            logger.warning("anthropic_unavailable", error=str(e))
+            return False
+
+
+class GroqAdapter(LLMAdapter):
+    """
+    Groq LLM adapter for ultra-fast inference.
+
+    Supports Llama, Mixtral, and other models on Groq infrastructure.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "llama-3.1-70b-versatile",
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self._client = None
+
+    def _get_client(self):
+        """Get or create the Groq client."""
+        if self._client is None:
+            try:
+                from groq import AsyncGroq
+                self._client = AsyncGroq(api_key=self.api_key)
+            except ImportError:
+                raise RuntimeError("groq package not installed. Run: pip install groq")
+        return self._client
+
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        stop_sequences: list[str] | None = None,
+    ) -> LLMResponse:
+        """Generate a completion using Groq."""
+        client = self._get_client()
+
+        groq_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
+
+        try:
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=groq_messages,
+                max_tokens=max_tokens or 1024,
+                temperature=temperature if temperature is not None else 0.7,
+                stop=stop_sequences,
+            )
+
+            choice = response.choices[0]
+            usage = response.usage
+
+            logger.debug(
+                "groq_completion",
+                model=self.model,
+                tokens=usage.total_tokens if usage else 0,
+            )
+
+            return LLMResponse(
+                text=choice.message.content or "",
+                finish_reason=choice.finish_reason or "stop",
+                usage={
+                    "prompt_tokens": usage.prompt_tokens if usage else 0,
+                    "completion_tokens": usage.completion_tokens if usage else 0,
+                    "total_tokens": usage.total_tokens if usage else 0,
+                },
+                model=response.model,
+            )
+
+        except Exception as e:
+            logger.error("groq_error", error=str(e))
+            raise
+
+    async def is_available(self) -> bool:
+        """Check if Groq API is available."""
+        try:
+            client = self._get_client()
+            await client.models.list()
+            return True
+        except Exception as e:
+            logger.warning("groq_unavailable", error=str(e))
+            return False
+
+
+class GeminiAdapter(LLMAdapter):
+    """
+    Google Gemini adapter using the google-generativeai client.
+
+    Supports Gemini Pro, Gemini Pro Vision, and other models.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gemini-1.5-pro",
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self._client = None
+
+    def _get_client(self):
+        """Get or create the Gemini client."""
+        if self._client is None:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.api_key)
+                self._client = genai.GenerativeModel(self.model)
+            except ImportError:
+                raise RuntimeError("google-generativeai not installed. Run: pip install google-generativeai")
+        return self._client
+
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        stop_sequences: list[str] | None = None,
+    ) -> LLMResponse:
+        """Generate a completion using Google Gemini."""
+        import asyncio
+
+        client = self._get_client()
+
+        # Convert messages to Gemini format
+        # Gemini uses a different format - combine into conversation
+        conversation_text = ""
+        for msg in messages:
+            if msg.role == "system":
+                conversation_text += f"Instructions: {msg.content}\n\n"
+            elif msg.role == "user":
+                conversation_text += f"User: {msg.content}\n"
+            elif msg.role == "assistant":
+                conversation_text += f"Assistant: {msg.content}\n"
+
+        try:
+            generation_config = {
+                "max_output_tokens": max_tokens or 1024,
+            }
+            if temperature is not None:
+                generation_config["temperature"] = temperature
+            if stop_sequences:
+                generation_config["stop_sequences"] = stop_sequences
+
+            # Gemini's generate_content is sync, run in executor
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: client.generate_content(
+                    conversation_text,
+                    generation_config=generation_config,
+                )
+            )
+
+            text = response.text if hasattr(response, 'text') else ""
+
+            # Estimate token usage (Gemini doesn't always provide this)
+            prompt_tokens = len(conversation_text.split()) * 1.3  # Rough estimate
+            completion_tokens = len(text.split()) * 1.3
+
+            logger.debug(
+                "gemini_completion",
+                model=self.model,
+                text_length=len(text),
+            )
+
+            return LLMResponse(
+                text=text,
+                finish_reason="stop",
+                usage={
+                    "prompt_tokens": int(prompt_tokens),
+                    "completion_tokens": int(completion_tokens),
+                    "total_tokens": int(prompt_tokens + completion_tokens),
+                },
+                model=self.model,
+            )
+
+        except Exception as e:
+            logger.error("gemini_error", error=str(e))
+            raise
+
+    async def is_available(self) -> bool:
+        """Check if Gemini API is available."""
+        try:
+            client = self._get_client()
+            return client is not None
+        except Exception as e:
+            logger.warning("gemini_unavailable", error=str(e))
+            return False
 
 
 def create_llm_adapter(provider: str | None = None) -> LLMAdapter:
@@ -258,23 +624,57 @@ def create_llm_adapter(provider: str | None = None) -> LLMAdapter:
     Factory function to create an LLM adapter.
 
     Args:
-        provider: LLM provider name ("mock", "openai", "anthropic")
+        provider: LLM provider name ("mock", "openai", "anthropic", "groq", "gemini")
                  If None, uses setting from config.
 
     Returns:
         Configured LLMAdapter instance
+
+    Environment variables required per provider:
+        - openai: OPENAI_API_KEY
+        - anthropic: ANTHROPIC_API_KEY
+        - groq: GROQ_API_KEY
+        - gemini: GOOGLE_API_KEY
     """
+    import os
+
     settings = get_settings()
     provider = provider or settings.llm_provider
 
     if provider == "mock":
         return MockLLMAdapter()
 
-    # TODO: Implement real adapters
-    # if provider == "openai":
-    #     return OpenAIAdapter(settings.openai_api_key, settings.llm_model)
-    # if provider == "anthropic":
-    #     return AnthropicAdapter(settings.anthropic_api_key, settings.llm_model)
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY") or getattr(settings, "openai_api_key", None)
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not set, falling back to mock")
+            return MockLLMAdapter()
+        model = getattr(settings, "llm_model", "gpt-4-turbo-preview")
+        return OpenAIAdapter(api_key=api_key, model=model)
+
+    if provider == "anthropic":
+        api_key = os.getenv("ANTHROPIC_API_KEY") or getattr(settings, "anthropic_api_key", None)
+        if not api_key:
+            logger.warning("ANTHROPIC_API_KEY not set, falling back to mock")
+            return MockLLMAdapter()
+        model = getattr(settings, "llm_model", "claude-3-5-sonnet-20241022")
+        return AnthropicAdapter(api_key=api_key, model=model)
+
+    if provider == "groq":
+        api_key = os.getenv("GROQ_API_KEY") or getattr(settings, "groq_api_key", None)
+        if not api_key:
+            logger.warning("GROQ_API_KEY not set, falling back to mock")
+            return MockLLMAdapter()
+        model = getattr(settings, "llm_model", "llama-3.1-70b-versatile")
+        return GroqAdapter(api_key=api_key, model=model)
+
+    if provider == "gemini":
+        api_key = os.getenv("GOOGLE_API_KEY") or getattr(settings, "google_api_key", None)
+        if not api_key:
+            logger.warning("GOOGLE_API_KEY not set, falling back to mock")
+            return MockLLMAdapter()
+        model = getattr(settings, "llm_model", "gemini-1.5-pro")
+        return GeminiAdapter(api_key=api_key, model=model)
 
     logger.warning(f"Unknown LLM provider: {provider}, using mock")
     return MockLLMAdapter()

@@ -25,6 +25,19 @@ from app.telephony.ivr import (
     IVRBuilder,
 )
 
+from app.telephony.twilio_client import (
+    TwilioClient,
+    OutboundCallParams,
+    TransferParams,
+    TransferType,
+    CallControlAction,
+    TwilioCallStatus,
+    CallResult,
+    TransferResult,
+    get_twilio_client,
+    shutdown_twilio_client,
+)
+
 __all__ = [
     # Voicemail
     "VoicemailStatus",
@@ -45,4 +58,15 @@ __all__ = [
     "IVRFlow",
     "IVREngine",
     "IVRBuilder",
+    # Twilio Client
+    "TwilioClient",
+    "OutboundCallParams",
+    "TransferParams",
+    "TransferType",
+    "CallControlAction",
+    "TwilioCallStatus",
+    "CallResult",
+    "TransferResult",
+    "get_twilio_client",
+    "shutdown_twilio_client",
 ]

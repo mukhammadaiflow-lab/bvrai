@@ -14,6 +14,9 @@ from app.database.models import (
     Call,
     CallStatus,
     CallDirection,
+    ResponseTimeLog,
+    QueueWaitTime,
+    UsageRecord,
 )
 from app.analytics.schemas import (
     DashboardOverview,
@@ -151,6 +154,53 @@ class AnalyticsService:
         if prev_week_calls > 0:
             calls_trend = ((calls_this_week - prev_week_calls) / prev_week_calls) * 100
 
+        # Calculate average response time from ResponseTimeLog
+        avg_response_time_ms = 0
+        try:
+            response_time_query = select(func.avg(ResponseTimeLog.total_latency_ms)).where(
+                ResponseTimeLog.total_latency_ms.isnot(None)
+            )
+            if agent_ids:
+                # Join with calls to filter by agent
+                response_time_query = (
+                    select(func.avg(ResponseTimeLog.total_latency_ms))
+                    .join(Call, Call.id == ResponseTimeLog.call_id)
+                    .where(
+                        and_(
+                            Call.agent_id.in_(agent_ids),
+                            ResponseTimeLog.total_latency_ms.isnot(None),
+                        )
+                    )
+                )
+            response_result = await self.db.execute(response_time_query)
+            avg_response_time_ms = int(response_result.scalar() or 0)
+        except Exception as e:
+            self.logger.warning("Failed to calculate response time", error=str(e))
+
+        # Calculate duration trend
+        prev_week_duration_query = select(func.sum(Call.duration_seconds)).where(
+            and_(
+                Call.created_at >= prev_week_start,
+                Call.created_at < week_start,
+                *base_conditions,
+            )
+        )
+        prev_duration_result = await self.db.execute(prev_week_duration_query)
+        prev_week_duration = prev_duration_result.scalar() or 0
+
+        this_week_duration_query = select(func.sum(Call.duration_seconds)).where(
+            and_(
+                Call.created_at >= week_start,
+                *base_conditions,
+            )
+        )
+        this_duration_result = await self.db.execute(this_week_duration_query)
+        this_week_duration = this_duration_result.scalar() or 0
+
+        duration_trend = 0
+        if prev_week_duration > 0:
+            duration_trend = ((this_week_duration - prev_week_duration) / prev_week_duration) * 100
+
         return DashboardOverview(
             total_calls=total_calls,
             calls_today=calls_today,
@@ -159,9 +209,9 @@ class AnalyticsService:
             total_minutes=total_minutes,
             avg_call_duration_seconds=float(avg_duration),
             completion_rate=completion_rate,
-            avg_response_time_ms=0,  # TODO: Calculate from logs
+            avg_response_time_ms=avg_response_time_ms,
             calls_trend_percentage=calls_trend,
-            duration_trend_percentage=0,
+            duration_trend_percentage=duration_trend,
             active_agents=active_agents,
             total_agents=total_agents,
         )
@@ -182,7 +232,7 @@ class AnalyticsService:
             if agent_ids:
                 agent_filter.append(Call.agent_id.in_(agent_ids))
 
-        # Query daily stats
+        # Query daily stats with unique callers count
         query = (
             select(
                 cast(Call.created_at, Date).label("date"),
@@ -193,6 +243,7 @@ class AnalyticsService:
                 func.avg(Call.duration_seconds).filter(
                     Call.status == CallStatus.COMPLETED
                 ).label("avg_duration"),
+                func.count(func.distinct(Call.from_number)).label("unique_callers"),
             )
             .where(
                 and_(
@@ -216,7 +267,7 @@ class AnalyticsService:
                 failed_calls=row.failed_calls or 0,
                 total_duration_seconds=int(row.total_duration or 0),
                 avg_duration_seconds=float(row.avg_duration or 0),
-                unique_callers=0,  # TODO: Count distinct callers
+                unique_callers=row.unique_callers or 0,
             )
             for row in rows
         ]
@@ -448,11 +499,28 @@ class AnalyticsService:
         agents_result = await self.db.execute(agents_query)
         agents_online = agents_result.scalar() or 0
 
+        # Calculate average wait time from QueueWaitTime
+        avg_wait_time = 0
+        try:
+            wait_query = select(func.avg(QueueWaitTime.wait_time_seconds)).where(
+                and_(
+                    QueueWaitTime.entered_queue_at >= one_minute_ago * 60,  # Last hour
+                    QueueWaitTime.wait_time_seconds.isnot(None),
+                )
+            )
+            if agent_ids:
+                wait_query = wait_query.where(QueueWaitTime.agent_id.in_(agent_ids))
+
+            wait_result = await self.db.execute(wait_query)
+            avg_wait_time = int(wait_result.scalar() or 0)
+        except Exception as e:
+            self.logger.warning("Failed to calculate wait time", error=str(e))
+
         return RealTimeMetrics(
             timestamp=now,
             active_calls=active_calls,
             calls_per_minute=calls_per_minute,
-            avg_wait_time_seconds=0,  # TODO: Calculate from queue times
+            avg_wait_time_seconds=avg_wait_time,
             agents_online=agents_online,
             queue_length=queue_length,
         )
@@ -492,6 +560,71 @@ class AnalyticsService:
         result = await self.db.execute(calls_query)
         row = result.fetchone()
 
+        # Query usage records for API calls, LLM tokens, TTS, etc.
+        user_filter = []
+        if owner_id:
+            user_filter.append(UsageRecord.user_id == owner_id)
+
+        # API calls
+        api_query = select(func.sum(UsageRecord.amount)).where(
+            and_(
+                UsageRecord.usage_type == "api_call",
+                UsageRecord.recorded_at >= start_date,
+                UsageRecord.recorded_at < end_date,
+                *user_filter,
+            )
+        )
+        api_result = await self.db.execute(api_query)
+        api_calls = api_result.scalar() or 0
+
+        # LLM tokens
+        llm_query = select(func.sum(UsageRecord.amount)).where(
+            and_(
+                UsageRecord.usage_type == "llm_tokens",
+                UsageRecord.recorded_at >= start_date,
+                UsageRecord.recorded_at < end_date,
+                *user_filter,
+            )
+        )
+        llm_result = await self.db.execute(llm_query)
+        llm_tokens = llm_result.scalar() or 0
+
+        # TTS characters
+        tts_query = select(func.sum(UsageRecord.amount)).where(
+            and_(
+                UsageRecord.usage_type == "tts_chars",
+                UsageRecord.recorded_at >= start_date,
+                UsageRecord.recorded_at < end_date,
+                *user_filter,
+            )
+        )
+        tts_result = await self.db.execute(tts_query)
+        tts_chars = tts_result.scalar() or 0
+
+        # Storage (recordings)
+        storage_query = select(func.sum(UsageRecord.amount)).where(
+            and_(
+                UsageRecord.usage_type == "storage_mb",
+                UsageRecord.recorded_at >= start_date,
+                UsageRecord.recorded_at < end_date,
+                *user_filter,
+            )
+        )
+        storage_result = await self.db.execute(storage_query)
+        recordings_size = storage_result.scalar() or 0
+
+        # Knowledge base storage
+        kb_query = select(func.sum(UsageRecord.amount)).where(
+            and_(
+                UsageRecord.usage_type == "kb_storage_mb",
+                UsageRecord.recorded_at >= start_date,
+                UsageRecord.recorded_at < end_date,
+                *user_filter,
+            )
+        )
+        kb_result = await self.db.execute(kb_query)
+        kb_size = kb_result.scalar() or 0
+
         return UsageMetrics(
             period_start=start_date,
             period_end=end_date,
@@ -499,10 +632,10 @@ class AnalyticsService:
             total_minutes=(row.total_seconds or 0) // 60,
             inbound_calls=row.inbound or 0,
             outbound_calls=row.outbound or 0,
-            api_calls=0,  # TODO: Track API usage
-            llm_tokens_used=0,  # TODO: Track LLM usage
-            tts_characters=0,  # TODO: Track TTS usage
-            asr_minutes=(row.total_seconds or 0) // 60,  # Approximate
-            recordings_size_mb=0,  # TODO: Track storage
-            knowledge_base_size_mb=0,
+            api_calls=api_calls,
+            llm_tokens_used=llm_tokens,
+            tts_characters=tts_chars,
+            asr_minutes=(row.total_seconds or 0) // 60,  # ASR time approximates call time
+            recordings_size_mb=recordings_size,
+            knowledge_base_size_mb=kb_size,
         )
