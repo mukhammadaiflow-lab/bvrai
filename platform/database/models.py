@@ -420,15 +420,15 @@ class Conversation(Base, TimestampMixin, SoftDeleteMixin):
     )
 
 
-class Message(Base, TimestampMixin):
+class Message(Base, TimestampMixin, SoftDeleteMixin):
     """Conversation message model."""
 
     __tablename__ = "messages"
 
     conversation_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("conversations.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("conversations.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     # Message content

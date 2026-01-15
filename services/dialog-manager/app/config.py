@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     rag_similarity_threshold: float = 0.7
 
     # Session Configuration
-    session_history_max_turns: int = 10
-    session_ttl_seconds: int = 3600
+    session_history_max_turns: int = 50  # Increased for better conversation context
+    session_ttl_seconds: int = 86400  # 24 hours (was 1 hour - too aggressive)
 
     # Rate Limiting
     rate_limit_requests: int = 100

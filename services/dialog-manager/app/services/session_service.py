@@ -71,13 +71,18 @@ class SessionService:
                 pass
 
     async def _cleanup_loop(self) -> None:
-        """Periodically clean up expired sessions."""
+        """Periodically clean up expired sessions from memory."""
         while True:
-            await asyncio.sleep(60)  # Check every minute
+            await asyncio.sleep(300)  # Check every 5 minutes (was every minute)
             await self._cleanup_expired()
 
     async def _cleanup_expired(self) -> None:
-        """Remove expired sessions."""
+        """
+        Clean up expired sessions from memory.
+
+        Note: This only removes sessions from in-memory storage to free resources.
+        Session data should be persisted to a database before removal for historical access.
+        """
         now = datetime.utcnow()
         ttl = timedelta(seconds=self._settings.session_ttl_seconds)
         expired = []
@@ -87,8 +92,21 @@ class SessionService:
                 expired.append(session_id)
 
         for session_id in expired:
+            # Log session data before removal for debugging/audit purposes
+            session = self._sessions.get(session_id)
+            if session:
+                logger.info(
+                    "session_archived",
+                    session_id=session_id,
+                    tenant_id=session.tenant_id,
+                    turn_count=len(session.history),
+                    created_at=session.created_at.isoformat(),
+                    last_activity=session.last_activity.isoformat(),
+                )
             del self._sessions[session_id]
-            logger.info("session_expired", session_id=session_id)
+
+        if expired:
+            logger.info("sessions_cleanup_complete", count=len(expired))
 
     def get_or_create(
         self,

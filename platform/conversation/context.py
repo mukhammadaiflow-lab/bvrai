@@ -482,8 +482,19 @@ class ContextManager:
 
         return True
 
-    def cleanup_expired(self, max_age_seconds: int = 86400) -> int:
-        """Remove expired contexts."""
+    def cleanup_expired(self, max_age_seconds: int = 604800) -> int:
+        """
+        Clean up expired contexts from memory (NOT from persistent storage).
+
+        This only removes contexts from the in-memory cache to free up resources.
+        Data in persistent storage is preserved for historical access.
+
+        Args:
+            max_age_seconds: Maximum age before cleanup (default: 7 days)
+
+        Returns:
+            Number of contexts cleaned up from memory
+        """
         now = time.time()
         expired = []
 
@@ -491,8 +502,23 @@ class ContextManager:
             if now - context.updated_at > max_age_seconds:
                 expired.append(session_id)
 
+        # Only remove from memory, preserve in storage
         for session_id in expired:
-            self.delete(session_id)
+            # Save to storage before removing from memory
+            if self._storage:
+                try:
+                    context = self._contexts.get(session_id)
+                    if context:
+                        self._storage.save(session_id, context.to_dict())
+                except Exception as e:
+                    logger.warning(f"Failed to save context before cleanup: {e}")
+
+            # Remove from memory only (not storage)
+            if session_id in self._contexts:
+                del self._contexts[session_id]
+
+        if expired:
+            logger.info(f"Cleaned up {len(expired)} contexts from memory (data preserved in storage)")
 
         return len(expired)
 

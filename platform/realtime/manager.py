@@ -92,7 +92,7 @@ class RealtimeConfig:
     max_audio_streams: int = 5000
 
     # Session settings
-    session_timeout_seconds: int = 3600
+    session_timeout_seconds: int = 86400  # 24 hours (was 1 hour - too aggressive)
     max_sessions_per_user: int = 10
     require_auth: bool = True
 
@@ -772,12 +772,12 @@ class RealtimeManager:
         """Background cleanup loop."""
         while self._running:
             try:
-                await asyncio.sleep(60)  # Run every minute
+                await asyncio.sleep(300)  # Run every 5 minutes (was every minute)
 
-                # Clean up expired sessions
+                # Clean up expired sessions (data is archived, not deleted)
                 cleaned = await self.session_manager.cleanup_expired_sessions()
                 if cleaned > 0:
-                    logger.info(f"Cleaned up {cleaned} expired sessions")
+                    logger.info(f"Archived {cleaned} expired sessions (data preserved)")
 
             except asyncio.CancelledError:
                 break

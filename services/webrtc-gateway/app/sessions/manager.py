@@ -191,7 +191,7 @@ class SessionManager:
         """Periodically cleanup expired sessions."""
         while True:
             try:
-                await asyncio.sleep(60)  # Check every minute
+                await asyncio.sleep(300)  # Check every 5 minutes (was every minute)
                 await self._cleanup_expired_sessions()
             except asyncio.CancelledError:
                 break
@@ -199,7 +199,12 @@ class SessionManager:
                 self.logger.error("Cleanup error", error=str(e))
 
     async def _cleanup_expired_sessions(self) -> None:
-        """Clean up expired sessions."""
+        """
+        Clean up expired sessions.
+
+        Note: Session data is preserved through the end_session call which notifies
+        the platform API. The session history is retained for analytics.
+        """
         expired = [
             session_id
             for session_id, session in self.sessions.items()
@@ -207,5 +212,17 @@ class SessionManager:
         ]
 
         for session_id in expired:
-            self.logger.info("Cleaning up expired session", session_id=session_id)
+            session = self.sessions.get(session_id)
+            if session:
+                self.logger.info(
+                    "Archiving expired session",
+                    session_id=session_id,
+                    agent_id=str(session.agent_id),
+                    duration_seconds=int(
+                        (session.last_activity - session.created_at).total_seconds()
+                    ),
+                )
             await self.end_session(session_id)
+
+        if expired:
+            self.logger.info("Session cleanup complete", count=len(expired))

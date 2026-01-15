@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     audio_codec: str = "opus"  # Opus codec for WebRTC
 
     # Session Configuration
-    session_timeout: int = 3600  # 1 hour
+    session_timeout: int = 86400  # 24 hours (was 1 hour - too aggressive for conversation data)
     max_concurrent_sessions: int = 1000
 
     # WebSocket Configuration

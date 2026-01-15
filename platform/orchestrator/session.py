@@ -151,7 +151,7 @@ class RedisSessionStorage(SessionStorageBackend):
         self,
         redis_url: str = "redis://localhost:6379",
         key_prefix: str = "call_session:",
-        ttl_seconds: int = 86400,  # 24 hours
+        ttl_seconds: int = 604800,  # 7 days (preserve conversation data longer)
     ):
         """
         Initialize Redis storage.
@@ -299,9 +299,10 @@ class SessionPoolConfig:
 
     max_sessions_per_org: int = 100
     max_total_sessions: int = 10000
-    session_timeout_seconds: int = 3600  # 1 hour
-    cleanup_interval_seconds: int = 60
+    session_timeout_seconds: int = 86400  # 24 hours (was 1 hour - too aggressive)
+    cleanup_interval_seconds: int = 300  # 5 minutes (was 60 seconds)
     enable_session_reuse: bool = False
+    enable_soft_delete: bool = True  # Archive sessions instead of hard delete
 
 
 class SessionPool:
@@ -373,7 +374,12 @@ class SessionPool:
                 logger.exception(f"Session cleanup error: {e}")
 
     async def _cleanup_stale_sessions(self) -> None:
-        """Remove stale sessions from the pool."""
+        """
+        Clean up stale sessions from active pool.
+
+        Note: Sessions are only removed from the active pool, not from storage.
+        This preserves conversation data while freeing up resources.
+        """
         now = datetime.utcnow()
         stale_sessions = []
 
@@ -384,15 +390,14 @@ class SessionPool:
                     stale_sessions.append(session_id)
 
         for session_id in stale_sessions:
-            logger.warning(f"Cleaning up stale session: {session_id}")
+            logger.info(f"Archiving stale session (preserving data): {session_id}")
             await self.release(session_id)
 
-        # Also cleanup storage
-        cleaned = await self.storage.cleanup_expired(
-            self.config.session_timeout_seconds * 2
-        )
-        if cleaned > 0:
-            logger.info(f"Cleaned up {cleaned} expired sessions from storage")
+        # Do NOT aggressively clean storage - let Redis TTL handle it naturally
+        # or rely on explicit cleanup operations
+        # This preserves conversation history for longer periods
+        if stale_sessions:
+            logger.info(f"Archived {len(stale_sessions)} stale sessions (data preserved)")
 
     async def acquire(
         self,
@@ -472,6 +477,9 @@ class SessionPool:
         """
         Release a session back to the pool.
 
+        Sessions are archived (soft deleted) rather than permanently deleted
+        to preserve conversation history and allow recovery.
+
         Args:
             session_id: Session ID to release
         """
@@ -489,13 +497,21 @@ class SessionPool:
                 elif session.state in (CallState.FAILED, CallState.CANCELED):
                     self._total_failed += 1
 
-        # Remove from storage
-        await self.storage.delete(session_id)
-
-        logger.info(
-            f"Released session {session_id} "
-            f"(active: {len(self._active_sessions)})"
-        )
+        # Archive instead of delete to preserve conversation data
+        # Only delete from active storage if soft delete is disabled
+        if not self.config.enable_soft_delete:
+            await self.storage.delete(session_id)
+            logger.info(
+                f"Released and deleted session {session_id} "
+                f"(active: {len(self._active_sessions)})"
+            )
+        else:
+            # Keep session in storage for historical access
+            # The session data remains accessible but is no longer active
+            logger.info(
+                f"Released session {session_id} (archived, not deleted) "
+                f"(active: {len(self._active_sessions)})"
+            )
 
     async def get(self, session_id: str) -> Optional[CallSession]:
         """
