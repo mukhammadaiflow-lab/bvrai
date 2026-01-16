@@ -7,8 +7,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { authApi } from '@/lib/api';
-import { User } from '@/types';
+import { authApi, User } from '@/lib/api';
 
 interface AuthState {
   user: User | null;
@@ -37,8 +36,8 @@ export const useAuth = create<AuthState>()(
       login: async (email: string, password: string) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await authApi.login(email, password);
-          const { access_token, user } = response;
+          const response = await authApi.login({ email, password });
+          const { access_token, user } = response.data;
 
           // Store token in localStorage for API client
           localStorage.setItem('auth_token', access_token);
@@ -49,8 +48,9 @@ export const useAuth = create<AuthState>()(
             isAuthenticated: true,
             isLoading: false,
           });
-        } catch (error: any) {
-          const message = error.response?.data?.detail || error.message || 'Login failed';
+        } catch (error: unknown) {
+          const err = error as { message?: string; response?: { data?: { detail?: string } } };
+          const message = err.response?.data?.detail || err.message || 'Login failed';
           set({ error: message, isLoading: false });
           throw error;
         }
@@ -60,7 +60,7 @@ export const useAuth = create<AuthState>()(
         set({ isLoading: true });
         try {
           await authApi.logout();
-        } catch (error) {
+        } catch {
           // Ignore logout errors, clear state anyway
         } finally {
           localStorage.removeItem('auth_token');
@@ -77,8 +77,13 @@ export const useAuth = create<AuthState>()(
       register: async (email: string, password: string, name: string, organizationName?: string) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await authApi.register(email, password, name, organizationName);
-          const { access_token, user } = response;
+          const response = await authApi.register({
+            email,
+            password,
+            name,
+            organization_name: organizationName,
+          });
+          const { access_token, user } = response.data;
 
           localStorage.setItem('auth_token', access_token);
 
@@ -88,8 +93,9 @@ export const useAuth = create<AuthState>()(
             isAuthenticated: true,
             isLoading: false,
           });
-        } catch (error: any) {
-          const message = error.response?.data?.detail || error.message || 'Registration failed';
+        } catch (error: unknown) {
+          const err = error as { message?: string; response?: { data?: { detail?: string } } };
+          const message = err.response?.data?.detail || err.message || 'Registration failed';
           set({ error: message, isLoading: false });
           throw error;
         }
@@ -104,14 +110,14 @@ export const useAuth = create<AuthState>()(
 
         set({ isLoading: true });
         try {
-          const user = await authApi.getCurrentUser();
+          const response = await authApi.me();
           set({
-            user,
+            user: response.data,
             token,
             isAuthenticated: true,
             isLoading: false,
           });
-        } catch (error) {
+        } catch {
           // Token invalid, clear state
           localStorage.removeItem('auth_token');
           set({

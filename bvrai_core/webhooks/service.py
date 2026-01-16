@@ -275,6 +275,7 @@ class WebhookManager:
         self._webhooks: Dict[str, Webhook] = {}
         self._deliveries: Dict[str, WebhookDelivery] = {}
         self._org_webhooks: Dict[str, Set[str]] = {}  # org_id -> webhook_ids
+        self._lock = asyncio.Lock()  # Lock for webhook operations
 
         # Background retry queue
         self._retry_queue: asyncio.Queue = asyncio.Queue()
@@ -337,11 +338,12 @@ class WebhookManager:
             created_by=created_by,
         )
 
-        self._webhooks[webhook.id] = webhook
+        async with self._lock:
+            self._webhooks[webhook.id] = webhook
 
-        if organization_id not in self._org_webhooks:
-            self._org_webhooks[organization_id] = set()
-        self._org_webhooks[organization_id].add(webhook.id)
+            if organization_id not in self._org_webhooks:
+                self._org_webhooks[organization_id] = set()
+            self._org_webhooks[organization_id].add(webhook.id)
 
         logger.info(
             f"Created webhook {webhook.id} for org {organization_id} "
@@ -392,14 +394,15 @@ class WebhookManager:
         return webhook
 
     async def delete_webhook(self, webhook_id: str) -> bool:
-        """Delete a webhook."""
-        webhook = self._webhooks.pop(webhook_id, None)
-        if webhook:
-            org_webhooks = self._org_webhooks.get(webhook.organization_id, set())
-            org_webhooks.discard(webhook_id)
-            logger.info(f"Deleted webhook {webhook_id}")
-            return True
-        return False
+        """Delete a webhook (thread-safe)."""
+        async with self._lock:
+            webhook = self._webhooks.pop(webhook_id, None)
+            if webhook:
+                org_webhooks = self._org_webhooks.get(webhook.organization_id, set())
+                org_webhooks.discard(webhook_id)
+                logger.info(f"Deleted webhook {webhook_id}")
+                return True
+            return False
 
     # =========================================================================
     # Event Triggering

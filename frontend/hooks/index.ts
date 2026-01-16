@@ -26,10 +26,14 @@ export {
 export {
   useCalls,
   useCall,
+  useCallTranscript,
+  useCallRecording,
+  useInitiateCall,
+  useEndCall,
+  useAddCallNote,
+  useHangupCall,
   useCallConversation,
   useCallEvents,
-  useInitiateCall,
-  useHangupCall,
   callKeys,
 } from './useCalls';
 
@@ -39,6 +43,8 @@ export {
   useCallsByDay,
   useAgentPerformance,
   useDashboardStats,
+  useCallQuality,
+  useSentimentAnalysis,
   useDateRange,
   analyticsKeys,
 } from './useAnalytics';
@@ -53,11 +59,14 @@ export {
 // Voice Configuration
 export {
   useVoiceConfigs,
-  useVoiceConfig,
+  useVoiceConfigById,
+  useVoiceConfigById as useVoiceConfig, // Alias for backwards compatibility
   useVoices,
+  useVoiceProviders,
   useCreateVoiceConfig,
   useUpdateVoiceConfig,
   useDeleteVoiceConfig,
+  useSetDefaultVoiceConfig,
   usePreviewVoice,
   voiceConfigKeys,
 } from './useVoiceConfig';
@@ -67,20 +76,27 @@ export {
   useWebhooks,
   useWebhook,
   useWebhookDeliveries,
+  useWebhookEvents,
   useCreateWebhook,
   useUpdateWebhook,
   useDeleteWebhook,
   useTestWebhook,
+  useEnableWebhook,
+  useDisableWebhook,
+  useRotateWebhookSecret,
   webhookKeys,
 } from './useWebhooks';
 
 // Billing
 export {
+  useSubscription,
   useCurrentPlan,
   useInvoices,
   useUsage,
   useCreateCheckout,
   useCancelSubscription,
+  useResumeSubscription,
+  useCreatePortalSession,
   billingKeys,
 } from './useBilling';
 
@@ -91,9 +107,11 @@ export {
   useTeamMembers,
   useInviteMember,
   useRemoveMember,
+  useUpdateMemberRole,
   useApiKeys,
   useCreateApiKey,
   useRevokeApiKey,
+  useRegenerateApiKey,
   organizationKeys,
   apiKeyKeys,
 } from './useOrganization';

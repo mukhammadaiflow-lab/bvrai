@@ -328,7 +328,7 @@ export default function CallsPage() {
                           {call.status === "in_progress" ? (
                             <span className="text-green-600">Live</span>
                           ) : (
-                            formatDuration(call.duration)
+                            formatDuration(call.duration ?? 0)
                           )}
                         </span>
                       </div>
@@ -353,9 +353,9 @@ export default function CallsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div>
-                        <p className="text-sm">{formatDate(call.startedAt, "PP")}</p>
+                        <p className="text-sm">{formatDate(call.startedAt)}</p>
                         <p className="text-xs text-muted-foreground">
-                          {formatDate(call.startedAt, "p")}
+                          {new Date(call.startedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
                         </p>
                       </div>
                     </td>

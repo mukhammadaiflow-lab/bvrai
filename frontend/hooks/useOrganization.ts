@@ -6,8 +6,14 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { organizationApi, apiKeysApi } from '@/lib/api';
-import { Organization, User, ApiKey } from '@/types';
+import {
+  organizationApi,
+  apiKeysApi,
+  Organization,
+  OrganizationMember,
+  ApiKey,
+  CreateApiKeyRequest
+} from '@/lib/api';
 
 // Query keys for cache management
 export const organizationKeys = {
@@ -27,7 +33,10 @@ export const apiKeyKeys = {
 export function useOrganization() {
   return useQuery({
     queryKey: organizationKeys.current(),
-    queryFn: () => organizationApi.getCurrent(),
+    queryFn: async () => {
+      const response = await organizationApi.get();
+      return response.data;
+    },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
@@ -39,7 +48,10 @@ export function useUpdateOrganization() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: Partial<Organization>) => organizationApi.update(data),
+    mutationFn: async (data: Partial<Organization>) => {
+      const response = await organizationApi.update(data);
+      return response.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organizationKeys.current() });
     },
@@ -52,7 +64,10 @@ export function useUpdateOrganization() {
 export function useTeamMembers() {
   return useQuery({
     queryKey: organizationKeys.members(),
-    queryFn: () => organizationApi.getMembers(),
+    queryFn: async () => {
+      const response = await organizationApi.members();
+      return response.data;
+    },
     staleTime: 60 * 1000, // 1 minute
   });
 }
@@ -64,8 +79,10 @@ export function useInviteMember() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ email, role }: { email: string; role: string }) =>
-      organizationApi.inviteMember(email, role),
+    mutationFn: async ({ email, role }: { email: string; role: 'admin' | 'member' }) => {
+      const response = await organizationApi.invite({ email, role });
+      return response.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organizationKeys.members() });
     },
@@ -79,7 +96,24 @@ export function useRemoveMember() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (userId: string) => organizationApi.removeMember(userId),
+    mutationFn: (memberId: string) => organizationApi.removeMember(memberId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: organizationKeys.members() });
+    },
+  });
+}
+
+/**
+ * Hook for updating a member's role
+ */
+export function useUpdateMemberRole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ memberId, role }: { memberId: string; role: OrganizationMember['role'] }) => {
+      const response = await organizationApi.updateMemberRole(memberId, role);
+      return response.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organizationKeys.members() });
     },
@@ -92,7 +126,10 @@ export function useRemoveMember() {
 export function useApiKeys() {
   return useQuery({
     queryKey: apiKeyKeys.lists(),
-    queryFn: () => apiKeysApi.list(),
+    queryFn: async () => {
+      const response = await apiKeysApi.list();
+      return response.data;
+    },
     staleTime: 60 * 1000, // 1 minute
   });
 }
@@ -104,8 +141,10 @@ export function useCreateApiKey() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ name, scopes }: { name: string; scopes: string[] }) =>
-      apiKeysApi.create(name, scopes),
+    mutationFn: async (data: CreateApiKeyRequest) => {
+      const response = await apiKeysApi.create(data);
+      return response.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: apiKeyKeys.lists() });
     },
@@ -120,6 +159,23 @@ export function useRevokeApiKey() {
 
   return useMutation({
     mutationFn: (id: string) => apiKeysApi.revoke(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: apiKeyKeys.lists() });
+    },
+  });
+}
+
+/**
+ * Hook for regenerating an API key
+ */
+export function useRegenerateApiKey() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiKeysApi.regenerate(id);
+      return response.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: apiKeyKeys.lists() });
     },

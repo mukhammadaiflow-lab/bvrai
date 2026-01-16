@@ -6,14 +6,13 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { agentsApi } from '@/lib/api';
-import { Agent, CreateAgentRequest, UpdateAgentRequest } from '@/types';
+import { agentsApi, Agent, CreateAgentRequest, UpdateAgentRequest, ListParams } from '@/lib/api';
 
 // Query keys for cache management
 export const agentKeys = {
   all: ['agents'] as const,
   lists: () => [...agentKeys.all, 'list'] as const,
-  list: (params: Record<string, any>) => [...agentKeys.lists(), params] as const,
+  list: (params: object) => [...agentKeys.lists(), params] as const,
   details: () => [...agentKeys.all, 'detail'] as const,
   detail: (id: string) => [...agentKeys.details(), id] as const,
   versions: (id: string) => [...agentKeys.detail(id), 'versions'] as const,
@@ -21,7 +20,7 @@ export const agentKeys = {
 
 interface UseAgentsParams {
   page?: number;
-  pageSize?: number;
+  limit?: number;
   status?: string;
   search?: string;
 }
@@ -32,12 +31,14 @@ interface UseAgentsParams {
 export function useAgents(params: UseAgentsParams = {}) {
   return useQuery({
     queryKey: agentKeys.list(params),
-    queryFn: () => agentsApi.list({
-      page: params.page,
-      page_size: params.pageSize,
-      status: params.status,
-      search: params.search,
-    }),
+    queryFn: async () => {
+      const response = await agentsApi.list({
+        page: params.page,
+        limit: params.limit,
+        search: params.search,
+      });
+      return response.data;
+    },
     staleTime: 30 * 1000, // 30 seconds
   });
 }
@@ -48,7 +49,10 @@ export function useAgents(params: UseAgentsParams = {}) {
 export function useAgent(id: string) {
   return useQuery({
     queryKey: agentKeys.detail(id),
-    queryFn: () => agentsApi.get(id),
+    queryFn: async () => {
+      const response = await agentsApi.get(id);
+      return response.data;
+    },
     enabled: !!id,
   });
 }
@@ -59,7 +63,10 @@ export function useAgent(id: string) {
 export function useAgentVersions(id: string) {
   return useQuery({
     queryKey: agentKeys.versions(id),
-    queryFn: () => agentsApi.getVersions(id),
+    queryFn: async () => {
+      const response = await agentsApi.getVersions(id);
+      return response.data;
+    },
     enabled: !!id,
   });
 }
@@ -71,7 +78,10 @@ export function useCreateAgent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: CreateAgentRequest) => agentsApi.create(data),
+    mutationFn: async (data: CreateAgentRequest) => {
+      const response = await agentsApi.create(data);
+      return response.data;
+    },
     onSuccess: () => {
       // Invalidate all agent lists
       queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
@@ -86,8 +96,10 @@ export function useUpdateAgent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdateAgentRequest }) =>
-      agentsApi.update(id, data),
+    mutationFn: async ({ id, data }: { id: string; data: UpdateAgentRequest }) => {
+      const response = await agentsApi.update(id, data);
+      return response.data;
+    },
     onSuccess: (_, variables) => {
       // Invalidate specific agent and lists
       queryClient.invalidateQueries({ queryKey: agentKeys.detail(variables.id) });
@@ -119,7 +131,10 @@ export function useDuplicateAgent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => agentsApi.duplicate(id),
+    mutationFn: async (id: string) => {
+      const response = await agentsApi.duplicate(id);
+      return response.data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
     },
@@ -133,8 +148,10 @@ export function useRollbackAgent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, version }: { id: string; version: number }) =>
-      agentsApi.rollback(id, version),
+    mutationFn: async ({ id, version }: { id: string; version: number }) => {
+      const response = await agentsApi.revertToVersion(id, version);
+      return response.data;
+    },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: agentKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: agentKeys.versions(variables.id) });

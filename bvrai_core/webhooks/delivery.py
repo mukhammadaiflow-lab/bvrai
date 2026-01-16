@@ -226,8 +226,10 @@ class WebhookDeliveryService:
             delivery_ids.append(delivery_log.id)
             tasks.append(self._deliver_with_retry(webhook, event, delivery_log))
 
-        # Execute deliveries concurrently
-        asyncio.gather(*tasks)
+        # Execute deliveries concurrently (fire-and-forget but ensure tasks are started)
+        if tasks:
+            # Create background task to avoid blocking the return
+            asyncio.create_task(asyncio.gather(*tasks, return_exceptions=True))
 
         return delivery_ids
 

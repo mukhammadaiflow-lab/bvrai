@@ -6,49 +6,62 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { analyticsApi } from '@/lib/api';
+import { analyticsApi, AnalyticsParams, AnalyticsOverview, AnalyticsTimeSeries } from '@/lib/api';
 
 // Query keys for cache management
 export const analyticsKeys = {
   all: ['analytics'] as const,
-  summary: (params: Record<string, any>) => [...analyticsKeys.all, 'summary', params] as const,
-  callsByDay: (params: Record<string, any>) => [...analyticsKeys.all, 'callsByDay', params] as const,
-  agentPerformance: () => [...analyticsKeys.all, 'agentPerformance'] as const,
-  dashboard: () => [...analyticsKeys.all, 'dashboard'] as const,
+  overview: (params: object) => [...analyticsKeys.all, 'overview', params] as const,
+  timeSeries: (params: object) => [...analyticsKeys.all, 'timeSeries', params] as const,
+  agentPerformance: (agentId: string) => [...analyticsKeys.all, 'agentPerformance', agentId] as const,
+  callQuality: (params: object) => [...analyticsKeys.all, 'callQuality', params] as const,
+  sentiment: (params: object) => [...analyticsKeys.all, 'sentiment', params] as const,
 };
 
-interface AnalyticsParams {
+interface UseAnalyticsParams {
   fromDate?: string;
   toDate?: string;
   agentId?: string;
+  granularity?: 'hour' | 'day' | 'week' | 'month';
 }
 
 /**
- * Hook for fetching analytics summary
+ * Hook for fetching analytics overview (summary)
  */
-export function useAnalyticsSummary(params: AnalyticsParams = {}) {
+export function useAnalyticsSummary(params: UseAnalyticsParams = {}) {
+  const apiParams: AnalyticsParams = {
+    from_date: params.fromDate,
+    to_date: params.toDate,
+    agent_id: params.agentId,
+  };
+
   return useQuery({
-    queryKey: analyticsKeys.summary(params),
-    queryFn: () => analyticsApi.getSummary({
-      from_date: params.fromDate,
-      to_date: params.toDate,
-      agent_id: params.agentId,
-    }),
+    queryKey: analyticsKeys.overview(params),
+    queryFn: async () => {
+      const response = await analyticsApi.overview(apiParams);
+      return response.data;
+    },
     staleTime: 60 * 1000, // 1 minute
   });
 }
 
 /**
- * Hook for fetching calls by day chart data
+ * Hook for fetching time series data (calls by day/period)
  */
-export function useCallsByDay(params: AnalyticsParams = {}) {
+export function useCallsByDay(params: UseAnalyticsParams = {}) {
+  const apiParams: AnalyticsParams = {
+    from_date: params.fromDate,
+    to_date: params.toDate,
+    agent_id: params.agentId,
+    granularity: params.granularity || 'day',
+  };
+
   return useQuery({
-    queryKey: analyticsKeys.callsByDay(params),
-    queryFn: () => analyticsApi.getCallsByDay({
-      from_date: params.fromDate,
-      to_date: params.toDate,
-      agent_id: params.agentId,
-    }),
+    queryKey: analyticsKeys.timeSeries(params),
+    queryFn: async () => {
+      const response = await analyticsApi.timeSeries(apiParams);
+      return response.data;
+    },
     staleTime: 60 * 1000, // 1 minute
   });
 }
@@ -56,23 +69,81 @@ export function useCallsByDay(params: AnalyticsParams = {}) {
 /**
  * Hook for fetching agent performance metrics
  */
-export function useAgentPerformance() {
+export function useAgentPerformance(agentId: string, params: UseAnalyticsParams = {}) {
+  const apiParams: AnalyticsParams = {
+    from_date: params.fromDate,
+    to_date: params.toDate,
+  };
+
   return useQuery({
-    queryKey: analyticsKeys.agentPerformance(),
-    queryFn: () => analyticsApi.getAgentPerformance(),
+    queryKey: analyticsKeys.agentPerformance(agentId),
+    queryFn: async () => {
+      const response = await analyticsApi.agentPerformance(agentId, apiParams);
+      return response.data;
+    },
+    enabled: !!agentId,
     staleTime: 60 * 1000, // 1 minute
   });
 }
 
 /**
- * Hook for fetching dashboard stats
+ * Hook for fetching dashboard stats (uses overview endpoint)
  */
-export function useDashboardStats() {
+export function useDashboardStats(params: UseAnalyticsParams = {}) {
+  const apiParams: AnalyticsParams = {
+    from_date: params.fromDate,
+    to_date: params.toDate,
+    agent_id: params.agentId,
+  };
+
   return useQuery({
-    queryKey: analyticsKeys.dashboard(),
-    queryFn: () => analyticsApi.getDashboardStats(),
+    queryKey: analyticsKeys.overview({ ...params, dashboard: true }),
+    queryFn: async () => {
+      const response = await analyticsApi.overview(apiParams);
+      return response.data;
+    },
     staleTime: 30 * 1000, // 30 seconds
     refetchInterval: 60 * 1000, // Auto-refresh every minute
+  });
+}
+
+/**
+ * Hook for fetching call quality metrics
+ */
+export function useCallQuality(params: UseAnalyticsParams = {}) {
+  const apiParams: AnalyticsParams = {
+    from_date: params.fromDate,
+    to_date: params.toDate,
+    agent_id: params.agentId,
+  };
+
+  return useQuery({
+    queryKey: analyticsKeys.callQuality(params),
+    queryFn: async () => {
+      const response = await analyticsApi.callQuality(apiParams);
+      return response.data;
+    },
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+/**
+ * Hook for fetching sentiment analysis
+ */
+export function useSentimentAnalysis(params: UseAnalyticsParams = {}) {
+  const apiParams: AnalyticsParams = {
+    from_date: params.fromDate,
+    to_date: params.toDate,
+    agent_id: params.agentId,
+  };
+
+  return useQuery({
+    queryKey: analyticsKeys.sentiment(params),
+    queryFn: async () => {
+      const response = await analyticsApi.sentimentAnalysis(apiParams);
+      return response.data;
+    },
+    staleTime: 60 * 1000, // 1 minute
   });
 }
 
@@ -84,7 +155,7 @@ export function useDateRange(period: 'today' | 'week' | 'month' | 'year') {
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
   let fromDate: Date;
-  let toDate: Date = now;
+  const toDate: Date = now;
 
   switch (period) {
     case 'today':

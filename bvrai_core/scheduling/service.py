@@ -260,6 +260,7 @@ class SlotGenerator:
     ):
         self._schedule_manager = schedule_manager
         self._booked_slots: Dict[str, Set[str]] = defaultdict(set)  # schedule_id -> slot keys
+        self._booking_lock = asyncio.Lock()  # Lock for booking operations
 
     def _slot_key(self, dt: datetime, duration: int) -> str:
         """Generate unique key for slot."""
@@ -362,13 +363,13 @@ class SlotGenerator:
         start_time: datetime,
         duration_minutes: int,
     ) -> bool:
-        """Mark a slot as booked."""
+        """Mark a slot as booked (thread-safe)."""
         slot_key = self._slot_key(start_time, duration_minutes)
-        if slot_key in self._booked_slots[schedule_id]:
-            return False
-
-        self._booked_slots[schedule_id].add(slot_key)
-        return True
+        async with self._booking_lock:
+            if slot_key in self._booked_slots[schedule_id]:
+                return False
+            self._booked_slots[schedule_id].add(slot_key)
+            return True
 
     async def release_slot(
         self,
@@ -376,12 +377,13 @@ class SlotGenerator:
         start_time: datetime,
         duration_minutes: int,
     ) -> bool:
-        """Release a booked slot."""
+        """Release a booked slot (thread-safe)."""
         slot_key = self._slot_key(start_time, duration_minutes)
-        if slot_key in self._booked_slots[schedule_id]:
-            self._booked_slots[schedule_id].remove(slot_key)
-            return True
-        return False
+        async with self._booking_lock:
+            if slot_key in self._booked_slots[schedule_id]:
+                self._booked_slots[schedule_id].remove(slot_key)
+                return True
+            return False
 
     async def get_available_slots(
         self,

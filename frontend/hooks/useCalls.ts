@@ -6,26 +6,25 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { callsApi } from '@/lib/api';
-import { Call } from '@/types';
+import { callsApi, Call, CallFilters, InitiateCallRequest } from '@/lib/api';
 
 // Query keys for cache management
 export const callKeys = {
   all: ['calls'] as const,
   lists: () => [...callKeys.all, 'list'] as const,
-  list: (params: Record<string, any>) => [...callKeys.lists(), params] as const,
+  list: (params: object) => [...callKeys.lists(), params] as const,
   details: () => [...callKeys.all, 'detail'] as const,
   detail: (id: string) => [...callKeys.details(), id] as const,
-  conversation: (id: string) => [...callKeys.detail(id), 'conversation'] as const,
-  events: (id: string) => [...callKeys.detail(id), 'events'] as const,
+  transcript: (id: string) => [...callKeys.detail(id), 'transcript'] as const,
+  recording: (id: string) => [...callKeys.detail(id), 'recording'] as const,
 };
 
 interface UseCallsParams {
   page?: number;
-  pageSize?: number;
+  limit?: number;
   agentId?: string;
-  status?: string;
-  direction?: string;
+  status?: Call['status'];
+  direction?: Call['direction'];
   fromDate?: string;
   toDate?: string;
 }
@@ -34,17 +33,22 @@ interface UseCallsParams {
  * Hook for fetching paginated list of calls
  */
 export function useCalls(params: UseCallsParams = {}) {
+  const apiParams: CallFilters = {
+    page: params.page,
+    limit: params.limit,
+    agent_id: params.agentId,
+    status: params.status,
+    direction: params.direction,
+    from_date: params.fromDate,
+    to_date: params.toDate,
+  };
+
   return useQuery({
     queryKey: callKeys.list(params),
-    queryFn: () => callsApi.list({
-      page: params.page,
-      page_size: params.pageSize,
-      agent_id: params.agentId,
-      status: params.status,
-      direction: params.direction,
-      from_date: params.fromDate,
-      to_date: params.toDate,
-    }),
+    queryFn: async () => {
+      const response = await callsApi.list(apiParams);
+      return response.data;
+    },
     staleTime: 10 * 1000, // 10 seconds - calls update frequently
     refetchInterval: 30 * 1000, // Auto-refresh every 30 seconds
   });
@@ -56,7 +60,10 @@ export function useCalls(params: UseCallsParams = {}) {
 export function useCall(id: string) {
   return useQuery({
     queryKey: callKeys.detail(id),
-    queryFn: () => callsApi.get(id),
+    queryFn: async () => {
+      const response = await callsApi.get(id);
+      return response.data;
+    },
     enabled: !!id,
     refetchInterval: (query) => {
       // Auto-refresh active calls every 5 seconds
@@ -70,23 +77,29 @@ export function useCall(id: string) {
 }
 
 /**
- * Hook for fetching call conversation/transcript
+ * Hook for fetching call transcript
  */
-export function useCallConversation(callId: string) {
+export function useCallTranscript(callId: string) {
   return useQuery({
-    queryKey: callKeys.conversation(callId),
-    queryFn: () => callsApi.getConversation(callId),
+    queryKey: callKeys.transcript(callId),
+    queryFn: async () => {
+      const response = await callsApi.getTranscript(callId);
+      return response.data;
+    },
     enabled: !!callId,
   });
 }
 
 /**
- * Hook for fetching call events
+ * Hook for fetching call recording URL
  */
-export function useCallEvents(callId: string) {
+export function useCallRecording(callId: string) {
   return useQuery({
-    queryKey: callKeys.events(callId),
-    queryFn: () => callsApi.getEvents(callId),
+    queryKey: callKeys.recording(callId),
+    queryFn: async () => {
+      const response = await callsApi.getRecording(callId);
+      return response.data;
+    },
     enabled: !!callId,
   });
 }
@@ -98,15 +111,10 @@ export function useInitiateCall() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      agentId,
-      toNumber,
-      metadata,
-    }: {
-      agentId: string;
-      toNumber: string;
-      metadata?: Record<string, any>;
-    }) => callsApi.initiateOutbound(agentId, toNumber, metadata),
+    mutationFn: async (data: InitiateCallRequest) => {
+      const response = await callsApi.initiate(data);
+      return response.data;
+    },
     onSuccess: () => {
       // Invalidate call lists to show new call
       queryClient.invalidateQueries({ queryKey: callKeys.lists() });
@@ -115,13 +123,16 @@ export function useInitiateCall() {
 }
 
 /**
- * Hook for hanging up a call
+ * Hook for ending a call
  */
-export function useHangupCall() {
+export function useEndCall() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (callId: string) => callsApi.hangup(callId),
+    mutationFn: async (callId: string) => {
+      const response = await callsApi.end(callId);
+      return response.data;
+    },
     onSuccess: (_, callId) => {
       // Invalidate specific call and lists
       queryClient.invalidateQueries({ queryKey: callKeys.detail(callId) });
@@ -129,3 +140,25 @@ export function useHangupCall() {
     },
   });
 }
+
+/**
+ * Hook for adding a note to a call
+ */
+export function useAddCallNote() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ callId, note }: { callId: string; note: string }) => {
+      const response = await callsApi.addNote(callId, note);
+      return response.data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: callKeys.detail(variables.callId) });
+    },
+  });
+}
+
+// Legacy alias for backwards compatibility
+export const useHangupCall = useEndCall;
+export const useCallConversation = useCallTranscript;
+export const useCallEvents = useCallTranscript;
