@@ -6,28 +6,32 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { billingApi } from '@/lib/api';
-import { Invoice, UsageSummary } from '@/types';
+import { billingApi, Subscription, UsageRecord, Invoice } from '@/lib/api';
 
 // Query keys for cache management
 export const billingKeys = {
   all: ['billing'] as const,
-  plan: () => [...billingKeys.all, 'plan'] as const,
+  subscription: () => [...billingKeys.all, 'subscription'] as const,
   invoices: () => [...billingKeys.all, 'invoices'] as const,
-  usage: (params?: { from_date?: string; to_date?: string }) =>
-    [...billingKeys.all, 'usage', params] as const,
+  usage: () => [...billingKeys.all, 'usage'] as const,
 };
 
 /**
- * Hook for fetching current plan and usage
+ * Hook for fetching current subscription
  */
-export function useCurrentPlan() {
+export function useSubscription() {
   return useQuery({
-    queryKey: billingKeys.plan(),
-    queryFn: () => billingApi.getCurrentPlan(),
+    queryKey: billingKeys.subscription(),
+    queryFn: async () => {
+      const response = await billingApi.subscription();
+      return response.data;
+    },
     staleTime: 60 * 1000, // 1 minute
   });
 }
+
+// Alias for backwards compatibility
+export const useCurrentPlan = useSubscription;
 
 /**
  * Hook for fetching invoices
@@ -35,7 +39,10 @@ export function useCurrentPlan() {
 export function useInvoices() {
   return useQuery({
     queryKey: billingKeys.invoices(),
-    queryFn: () => billingApi.getInvoices(),
+    queryFn: async () => {
+      const response = await billingApi.invoices();
+      return response.data;
+    },
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
@@ -43,10 +50,13 @@ export function useInvoices() {
 /**
  * Hook for fetching usage data
  */
-export function useUsage(params?: { from_date?: string; to_date?: string }) {
+export function useUsage() {
   return useQuery({
-    queryKey: billingKeys.usage(params),
-    queryFn: () => billingApi.getUsage(params),
+    queryKey: billingKeys.usage(),
+    queryFn: async () => {
+      const response = await billingApi.usage();
+      return response.data;
+    },
     staleTime: 60 * 1000, // 1 minute
   });
 }
@@ -56,10 +66,13 @@ export function useUsage(params?: { from_date?: string; to_date?: string }) {
  */
 export function useCreateCheckout() {
   return useMutation({
-    mutationFn: (planId: string) => billingApi.createCheckoutSession(planId),
+    mutationFn: async (priceId: string) => {
+      const response = await billingApi.createCheckout(priceId);
+      return response.data;
+    },
     onSuccess: (data) => {
       // Redirect to checkout
-      if (data.checkout_url) {
+      if (data && data.checkout_url) {
         window.location.href = data.checkout_url;
       }
     },
@@ -73,9 +86,46 @@ export function useCancelSubscription() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => billingApi.cancelSubscription(),
+    mutationFn: async () => {
+      const response = await billingApi.cancelSubscription();
+      return response.data;
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: billingKeys.plan() });
+      queryClient.invalidateQueries({ queryKey: billingKeys.subscription() });
+    },
+  });
+}
+
+/**
+ * Hook for resuming a cancelled subscription
+ */
+export function useResumeSubscription() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const response = await billingApi.resumeSubscription();
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: billingKeys.subscription() });
+    },
+  });
+}
+
+/**
+ * Hook for opening billing portal
+ */
+export function useCreatePortalSession() {
+  return useMutation({
+    mutationFn: async () => {
+      const response = await billingApi.createPortalSession();
+      return response.data;
+    },
+    onSuccess: (data) => {
+      if (data && data.portal_url) {
+        window.location.href = data.portal_url;
+      }
     },
   });
 }

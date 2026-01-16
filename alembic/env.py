@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import your models' Base metadata
-from platform.database.base import Base
+from bvrai_core.database.base import Base
 
 # This is the Alembic Config object
 config = context.config
