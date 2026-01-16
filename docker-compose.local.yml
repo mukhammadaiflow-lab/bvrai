@@ -1,0 +1,155 @@
+# BVRAI Voice AI Platform - Local Development Docker Compose
+# Simplified MVP configuration for local development
+#
+# Usage:
+#   docker-compose -f docker-compose.local.yml up -d
+#
+# Services:
+#   - api: Backend FastAPI application (port 8000)
+#   - frontend: Next.js frontend (port 3000)
+#   - postgres: PostgreSQL database (port 5432)
+#   - redis: Redis cache (port 6379)
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Backend API
+  # =============================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bvrai-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      - DATABASE_URL=postgresql+asyncpg://bvrai:bvrai_secret@postgres:5432/bvrai
+      - DATABASE_POOL_SIZE=10
+      - DATABASE_MAX_OVERFLOW=20
+
+      # Cache
+      - REDIS_URL=redis://redis:6379/0
+
+      # App Config
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+
+      # API Keys (set in .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+
+      # Security
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - API_KEY_SALT=${API_KEY_SALT:-dev-api-key-salt}
+    volumes:
+      - ./bvrai_core:/app/bvrai_core:ro
+      - api-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bvrai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # =============================================================================
+  # Frontend
+  # =============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: bvrai-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+    volumes:
+      - ./frontend:/app:cached
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    networks:
+      - bvrai-network
+
+  # =============================================================================
+  # PostgreSQL Database
+  # =============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: bvrai-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=bvrai
+      - POSTGRES_PASSWORD=bvrai_secret
+      - POSTGRES_DB=bvrai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - bvrai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bvrai -d bvrai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # =============================================================================
+  # Redis Cache
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: bvrai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - bvrai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  bvrai-network:
+    name: bvrai-network
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-data:
+    name: bvrai-postgres-data
+  redis-data:
+    name: bvrai-redis-data
+  api-data:
+    name: bvrai-api-data

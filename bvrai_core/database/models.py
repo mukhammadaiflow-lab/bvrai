@@ -258,8 +258,8 @@ class Agent(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     total_calls: Mapped[int] = mapped_column(Integer, default=0)
     total_minutes: Mapped[float] = mapped_column(Float, default=0.0)
 
-    # Metadata
-    metadata: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    # Metadata (using 'extra_data' to avoid SQLAlchemy reserved 'metadata')
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
     metadata_json: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)  # Legacy
     tags: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
 

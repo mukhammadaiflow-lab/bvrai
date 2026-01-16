@@ -321,7 +321,7 @@ def agent_to_response(agent) -> dict:
         "knowledge_base_ids": agent.knowledge_base_ids or [],
         "functions": agent.functions or [],
         "is_active": agent.is_active,
-        "metadata": agent.metadata or {},
+        "metadata": agent.extra_data or {},
         "created_at": agent.created_at,
         "updated_at": agent.updated_at,
         "total_calls": agent.total_calls or 0,
@@ -379,7 +379,7 @@ async def create_agent(
         transcription_config=(request.transcription or TranscriptionConfig()).dict(),
         knowledge_base_ids=request.knowledge_base_ids,
         functions=request.functions,
-        metadata=request.metadata,
+        extra_data=request.metadata,
         is_active=True,
     )
 
@@ -504,7 +504,7 @@ async def update_agent(
     if request.functions is not None:
         update_data["functions"] = request.functions
     if request.metadata is not None:
-        update_data["metadata"] = request.metadata
+        update_data["extra_data"] = request.metadata
     if request.is_active is not None:
         update_data["is_active"] = request.is_active
 
@@ -586,7 +586,7 @@ async def duplicate_agent(
         transcription_config=original.transcription_config,
         knowledge_base_ids=original.knowledge_base_ids,
         functions=original.functions,
-        metadata=original.metadata,
+        extra_data=original.extra_data,
         is_active=True,
     )
 
