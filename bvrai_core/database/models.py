@@ -665,6 +665,466 @@ class UsageRecord(Base, TimestampMixin):
 
 
 # =============================================================================
+# Phone Number Models
+# =============================================================================
+
+
+class PhoneNumber(Base, TimestampMixin, SoftDeleteMixin):
+    """Phone number model for telephony management."""
+
+    __tablename__ = "phone_numbers"
+
+    organization_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Phone number details
+    number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)  # E.164 format
+    friendly_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Provider info
+    provider: Mapped[str] = mapped_column(String(50), default="twilio")  # twilio, vonage, bandwidth
+    provider_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Type and capabilities
+    number_type: Mapped[str] = mapped_column(String(20), default="local")  # local, toll_free, mobile
+    country_code: Mapped[str] = mapped_column(String(5), default="US")
+
+    # Capabilities
+    voice_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Assignment
+    agent_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Configuration
+    webhook_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    fallback_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    status_callback_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active, inactive, pending, released
+
+    # Billing
+    monthly_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(10), default="USD")
+
+    # Metadata
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    organization = relationship("Organization")
+    agent = relationship("Agent")
+
+    __table_args__ = (
+        Index("ix_phone_numbers_organization_id", "organization_id"),
+        Index("ix_phone_numbers_number", "number"),
+        Index("ix_phone_numbers_agent_id", "agent_id"),
+        Index("ix_phone_numbers_status", "status"),
+    )
+
+
+# =============================================================================
+# Webhook Models
+# =============================================================================
+
+
+class Webhook(Base, TimestampMixin, SoftDeleteMixin):
+    """Webhook configuration model."""
+
+    __tablename__ = "webhooks"
+
+    organization_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Basic info
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # URL and authentication
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # For signing requests
+
+    # Authentication method
+    auth_type: Mapped[str] = mapped_column(String(20), default="none")  # none, basic, bearer, hmac
+    auth_value: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Encrypted
+
+    # Events to subscribe to
+    events: Mapped[List] = mapped_column(JSON, default=list)  # List of event types
+    # Examples: call.started, call.ended, agent.updated, campaign.completed
+
+    # Filtering
+    agent_ids: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)  # Filter by specific agents
+
+    # Status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Retry configuration
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    retry_delay_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=30)
+
+    # Statistics
+    total_deliveries: Mapped[int] = mapped_column(Integer, default=0)
+    successful_deliveries: Mapped[int] = mapped_column(Integer, default=0)
+    failed_deliveries: Mapped[int] = mapped_column(Integer, default=0)
+    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Metadata
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    organization = relationship("Organization")
+    deliveries = relationship("WebhookDelivery", back_populates="webhook", order_by="WebhookDelivery.created_at.desc()")
+
+    __table_args__ = (
+        Index("ix_webhooks_organization_id", "organization_id"),
+        Index("ix_webhooks_is_active", "is_active"),
+    )
+
+
+class WebhookDelivery(Base, TimestampMixin):
+    """Webhook delivery attempt record."""
+
+    __tablename__ = "webhook_deliveries"
+
+    webhook_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("webhooks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Event info
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False)  # Unique event identifier
+
+    # Request details
+    request_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    request_headers: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    request_body: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Response details
+    response_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    response_headers: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    response_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timing
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, success, failed, retrying
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Retry info
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    webhook = relationship("Webhook", back_populates="deliveries")
+
+    __table_args__ = (
+        Index("ix_webhook_deliveries_webhook_id", "webhook_id"),
+        Index("ix_webhook_deliveries_event_type", "event_type"),
+        Index("ix_webhook_deliveries_status", "status"),
+        Index("ix_webhook_deliveries_created_at", "created_at"),
+    )
+
+
+# =============================================================================
+# Knowledge Base Models
+# =============================================================================
+
+
+class KnowledgeBase(Base, TimestampMixin, SoftDeleteMixin):
+    """Knowledge base model for RAG functionality."""
+
+    __tablename__ = "knowledge_bases"
+
+    organization_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Basic info
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Configuration
+    embedding_model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    embedding_provider: Mapped[str] = mapped_column(String(50), default="openai")
+    chunk_size: Mapped[int] = mapped_column(Integer, default=1000)
+    chunk_overlap: Mapped[int] = mapped_column(Integer, default=200)
+
+    # Vector store
+    vector_store: Mapped[str] = mapped_column(String(50), default="qdrant")  # qdrant, pinecone, weaviate
+    vector_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active, processing, error
+
+    # Statistics
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Metadata
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    organization = relationship("Organization")
+    documents = relationship("Document", back_populates="knowledge_base", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_knowledge_bases_organization_id", "organization_id"),
+        Index("ix_knowledge_bases_status", "status"),
+    )
+
+
+class Document(Base, TimestampMixin, SoftDeleteMixin):
+    """Document within a knowledge base."""
+
+    __tablename__ = "documents"
+
+    knowledge_base_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+    # Basic info
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Document type
+    doc_type: Mapped[str] = mapped_column(String(50), default="text")  # text, pdf, url, faq, csv
+
+    # Content
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # For text/FAQ types
+    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # For URL types
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # For file uploads
+    file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    mime_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Processing status
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, processing, completed, failed
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Processing stats
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Metadata
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    knowledge_base = relationship("KnowledgeBase", back_populates="documents")
+    chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_documents_knowledge_base_id", "knowledge_base_id"),
+        Index("ix_documents_organization_id", "organization_id"),
+        Index("ix_documents_status", "status"),
+        Index("ix_documents_doc_type", "doc_type"),
+    )
+
+
+class DocumentChunk(Base, TimestampMixin):
+    """Document chunk for vector embedding."""
+
+    __tablename__ = "document_chunks"
+
+    document_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+    # Chunk content
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Position
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_char: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    end_char: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Token info
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Vector info
+    vector_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # ID in vector store
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Metadata for retrieval
+    chunk_metadata: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    document = relationship("Document", back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_document_chunks_document_id", "document_id"),
+        Index("ix_document_chunks_knowledge_base_id", "knowledge_base_id"),
+        Index("ix_document_chunks_vector_id", "vector_id"),
+    )
+
+
+# =============================================================================
+# Campaign Models
+# =============================================================================
+
+
+class Campaign(Base, TimestampMixin, SoftDeleteMixin):
+    """Outbound calling campaign model."""
+
+    __tablename__ = "campaigns"
+
+    organization_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Basic info
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Agent and phone number
+    agent_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    phone_number_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("phone_numbers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Schedule configuration
+    schedule_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    # Contains: start_time, end_time, timezone, daily_start_hour, daily_end_hour,
+    #           days_of_week, max_concurrent_calls, calls_per_minute
+
+    # Retry configuration
+    retry_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    # Contains: max_attempts, retry_delay_minutes, retry_on_busy, retry_on_no_answer, retry_on_voicemail
+
+    # Status
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    # draft, scheduled, running, paused, completed, canceled
+
+    # Statistics
+    total_contacts: Mapped[int] = mapped_column(Integer, default=0)
+    calls_completed: Mapped[int] = mapped_column(Integer, default=0)
+    calls_successful: Mapped[int] = mapped_column(Integer, default=0)
+    calls_failed: Mapped[int] = mapped_column(Integer, default=0)
+    calls_pending: Mapped[int] = mapped_column(Integer, default=0)
+    calls_in_progress: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timing
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Cost tracking
+    total_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    total_minutes: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Metadata
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    organization = relationship("Organization")
+    agent = relationship("Agent")
+    phone_number = relationship("PhoneNumber")
+    contacts = relationship("CampaignContact", back_populates="campaign", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_campaigns_organization_id", "organization_id"),
+        Index("ix_campaigns_agent_id", "agent_id"),
+        Index("ix_campaigns_status", "status"),
+        Index("ix_campaigns_created_at", "created_at"),
+    )
+
+
+class CampaignContact(Base, TimestampMixin):
+    """Contact within a campaign."""
+
+    __tablename__ = "campaign_contacts"
+
+    campaign_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+    # Contact info
+    phone_number: Mapped[str] = mapped_column(String(50), nullable=False)  # E.164 format
+    first_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Custom context for the call
+    context: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Call status
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # pending, queued, calling, completed, failed, skipped
+
+    # Call details
+    call_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    call_outcome: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # answered, voicemail, no_answer, busy, failed
+
+    # Attempt tracking
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Result
+    call_duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    call_cost: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Notes
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Metadata
+    extra_data: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Relationships
+    campaign = relationship("Campaign", back_populates="contacts")
+
+    __table_args__ = (
+        Index("ix_campaign_contacts_campaign_id", "campaign_id"),
+        Index("ix_campaign_contacts_organization_id", "organization_id"),
+        Index("ix_campaign_contacts_status", "status"),
+        Index("ix_campaign_contacts_phone_number", "phone_number"),
+        UniqueConstraint("campaign_id", "phone_number", name="uq_campaign_contact_phone"),
+    )
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
@@ -690,4 +1150,16 @@ __all__ = [
     # Analytics
     "AnalyticsEvent",
     "UsageRecord",
+    # Phone Numbers
+    "PhoneNumber",
+    # Webhooks
+    "Webhook",
+    "WebhookDelivery",
+    # Knowledge Base
+    "KnowledgeBase",
+    "Document",
+    "DocumentChunk",
+    # Campaigns
+    "Campaign",
+    "CampaignContact",
 ]

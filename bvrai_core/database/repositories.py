@@ -26,6 +26,14 @@ from .models import (
     CallEvent,
     AnalyticsEvent,
     UsageRecord,
+    PhoneNumber,
+    Webhook,
+    WebhookDelivery,
+    KnowledgeBase,
+    Document,
+    DocumentChunk,
+    Campaign,
+    CampaignContact,
 )
 
 
@@ -1012,6 +1020,835 @@ class AnalyticsRepository(BaseRepository[AnalyticsEvent]):
 
 
 # =============================================================================
+# Phone Number Repository
+# =============================================================================
+
+
+class PhoneNumberRepository(BaseRepository[PhoneNumber]):
+    """Repository for PhoneNumber entities."""
+
+    model = PhoneNumber
+
+    async def get_by_number(self, number: str) -> Optional[PhoneNumber]:
+        """Get phone number by E.164 number."""
+        result = await self.session.execute(
+            select(PhoneNumber).where(
+                and_(
+                    PhoneNumber.number == number,
+                    PhoneNumber.is_deleted == False,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_by_organization(
+        self,
+        organization_id: str,
+        status: str = None,
+        agent_id: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[PhoneNumber]:
+        """List phone numbers by organization."""
+        conditions = [
+            PhoneNumber.organization_id == organization_id,
+            PhoneNumber.is_deleted == False,
+        ]
+        if status:
+            conditions.append(PhoneNumber.status == status)
+        if agent_id:
+            conditions.append(PhoneNumber.agent_id == agent_id)
+
+        result = await self.session.execute(
+            select(PhoneNumber)
+            .where(and_(*conditions))
+            .order_by(PhoneNumber.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_organization(
+        self,
+        organization_id: str,
+        status: str = None,
+    ) -> int:
+        """Count phone numbers by organization."""
+        conditions = [
+            PhoneNumber.organization_id == organization_id,
+            PhoneNumber.is_deleted == False,
+        ]
+        if status:
+            conditions.append(PhoneNumber.status == status)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(PhoneNumber)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
+    async def get_available(
+        self,
+        organization_id: str,
+    ) -> List[PhoneNumber]:
+        """Get available (unassigned) phone numbers."""
+        result = await self.session.execute(
+            select(PhoneNumber).where(
+                and_(
+                    PhoneNumber.organization_id == organization_id,
+                    PhoneNumber.agent_id == None,
+                    PhoneNumber.status == "active",
+                    PhoneNumber.is_deleted == False,
+                )
+            )
+        )
+        return list(result.scalars().all())
+
+    async def assign_to_agent(
+        self,
+        phone_number_id: str,
+        agent_id: str,
+    ) -> Optional[PhoneNumber]:
+        """Assign phone number to an agent."""
+        phone = await self.get_by_id(phone_number_id)
+        if not phone:
+            return None
+        phone.agent_id = agent_id
+        await self.session.flush()
+        await self.session.refresh(phone)
+        return phone
+
+    async def unassign_from_agent(self, phone_number_id: str) -> Optional[PhoneNumber]:
+        """Unassign phone number from agent."""
+        return await self.assign_to_agent(phone_number_id, None)
+
+
+# =============================================================================
+# Webhook Repository
+# =============================================================================
+
+
+class WebhookRepository(BaseRepository[Webhook]):
+    """Repository for Webhook entities."""
+
+    model = Webhook
+
+    async def list_by_organization(
+        self,
+        organization_id: str,
+        is_active: bool = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[Webhook]:
+        """List webhooks by organization."""
+        conditions = [
+            Webhook.organization_id == organization_id,
+            Webhook.is_deleted == False,
+        ]
+        if is_active is not None:
+            conditions.append(Webhook.is_active == is_active)
+
+        result = await self.session.execute(
+            select(Webhook)
+            .where(and_(*conditions))
+            .order_by(Webhook.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_organization(
+        self,
+        organization_id: str,
+        is_active: bool = None,
+    ) -> int:
+        """Count webhooks by organization."""
+        conditions = [
+            Webhook.organization_id == organization_id,
+            Webhook.is_deleted == False,
+        ]
+        if is_active is not None:
+            conditions.append(Webhook.is_active == is_active)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Webhook)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
+    async def get_for_event(
+        self,
+        organization_id: str,
+        event_type: str,
+        agent_id: str = None,
+    ) -> List[Webhook]:
+        """Get active webhooks that subscribe to an event type."""
+        result = await self.session.execute(
+            select(Webhook).where(
+                and_(
+                    Webhook.organization_id == organization_id,
+                    Webhook.is_active == True,
+                    Webhook.is_deleted == False,
+                )
+            )
+        )
+        webhooks = result.scalars().all()
+
+        # Filter by event type and agent_id
+        matching = []
+        for webhook in webhooks:
+            events = webhook.events or []
+            if event_type in events or "*" in events:
+                # Check agent filter
+                agent_ids = webhook.agent_ids or []
+                if not agent_ids or agent_id in agent_ids:
+                    matching.append(webhook)
+
+        return matching
+
+    async def create_delivery(
+        self,
+        webhook_id: str,
+        event_type: str,
+        event_id: str,
+        request_url: str,
+        request_headers: Dict = None,
+        request_body: Dict = None,
+    ) -> WebhookDelivery:
+        """Create a webhook delivery record."""
+        delivery = WebhookDelivery(
+            webhook_id=webhook_id,
+            event_type=event_type,
+            event_id=event_id,
+            request_url=request_url,
+            request_headers=request_headers,
+            request_body=request_body,
+            status="pending",
+        )
+        self.session.add(delivery)
+        await self.session.flush()
+        await self.session.refresh(delivery)
+        return delivery
+
+    async def update_delivery(
+        self,
+        delivery_id: str,
+        status: str,
+        response_status: int = None,
+        response_headers: Dict = None,
+        response_body: str = None,
+        duration_ms: int = None,
+        error_message: str = None,
+    ) -> Optional[WebhookDelivery]:
+        """Update webhook delivery status."""
+        result = await self.session.execute(
+            select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
+        )
+        delivery = result.scalar_one_or_none()
+        if not delivery:
+            return None
+
+        delivery.status = status
+        if response_status is not None:
+            delivery.response_status = response_status
+        if response_headers is not None:
+            delivery.response_headers = response_headers
+        if response_body is not None:
+            delivery.response_body = response_body
+        if duration_ms is not None:
+            delivery.duration_ms = duration_ms
+        if error_message is not None:
+            delivery.error_message = error_message
+
+        # Update webhook stats
+        webhook = await self.get_by_id(delivery.webhook_id)
+        if webhook:
+            webhook.total_deliveries += 1
+            webhook.last_triggered_at = datetime.utcnow()
+            if status == "success":
+                webhook.successful_deliveries += 1
+                webhook.last_success_at = datetime.utcnow()
+            elif status == "failed":
+                webhook.failed_deliveries += 1
+                webhook.last_failure_at = datetime.utcnow()
+
+        await self.session.flush()
+        await self.session.refresh(delivery)
+        return delivery
+
+    async def get_deliveries(
+        self,
+        webhook_id: str,
+        status: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[WebhookDelivery]:
+        """Get deliveries for a webhook."""
+        conditions = [WebhookDelivery.webhook_id == webhook_id]
+        if status:
+            conditions.append(WebhookDelivery.status == status)
+
+        result = await self.session.execute(
+            select(WebhookDelivery)
+            .where(and_(*conditions))
+            .order_by(WebhookDelivery.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+
+# =============================================================================
+# Knowledge Base Repository
+# =============================================================================
+
+
+class KnowledgeBaseRepository(BaseRepository[KnowledgeBase]):
+    """Repository for KnowledgeBase entities."""
+
+    model = KnowledgeBase
+
+    async def list_by_organization(
+        self,
+        organization_id: str,
+        status: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[KnowledgeBase]:
+        """List knowledge bases by organization."""
+        conditions = [
+            KnowledgeBase.organization_id == organization_id,
+            KnowledgeBase.is_deleted == False,
+        ]
+        if status:
+            conditions.append(KnowledgeBase.status == status)
+
+        result = await self.session.execute(
+            select(KnowledgeBase)
+            .where(and_(*conditions))
+            .order_by(KnowledgeBase.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_organization(
+        self,
+        organization_id: str,
+        status: str = None,
+    ) -> int:
+        """Count knowledge bases by organization."""
+        conditions = [
+            KnowledgeBase.organization_id == organization_id,
+            KnowledgeBase.is_deleted == False,
+        ]
+        if status:
+            conditions.append(KnowledgeBase.status == status)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(KnowledgeBase)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
+    async def get_with_documents(self, id: str) -> Optional[KnowledgeBase]:
+        """Get knowledge base with documents."""
+        result = await self.session.execute(
+            select(KnowledgeBase)
+            .options(selectinload(KnowledgeBase.documents))
+            .where(KnowledgeBase.id == id)
+        )
+        return result.scalar_one_or_none()
+
+    async def add_document(
+        self,
+        knowledge_base_id: str,
+        organization_id: str,
+        name: str,
+        doc_type: str,
+        content: str = None,
+        source_url: str = None,
+        file_path: str = None,
+        file_size: int = None,
+        mime_type: str = None,
+        extra_data: Dict = None,
+    ) -> Document:
+        """Add a document to knowledge base."""
+        document = Document(
+            knowledge_base_id=knowledge_base_id,
+            organization_id=organization_id,
+            name=name,
+            doc_type=doc_type,
+            content=content,
+            source_url=source_url,
+            file_path=file_path,
+            file_size=file_size,
+            mime_type=mime_type,
+            extra_data=extra_data,
+            status="pending",
+        )
+        self.session.add(document)
+
+        # Update document count
+        await self.session.execute(
+            update(KnowledgeBase)
+            .where(KnowledgeBase.id == knowledge_base_id)
+            .values(document_count=KnowledgeBase.document_count + 1)
+        )
+
+        await self.session.flush()
+        await self.session.refresh(document)
+        return document
+
+    async def get_document(self, document_id: str) -> Optional[Document]:
+        """Get document by ID."""
+        result = await self.session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_documents(
+        self,
+        knowledge_base_id: str,
+        status: str = None,
+        doc_type: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[Document]:
+        """List documents in knowledge base."""
+        conditions = [
+            Document.knowledge_base_id == knowledge_base_id,
+            Document.is_deleted == False,
+        ]
+        if status:
+            conditions.append(Document.status == status)
+        if doc_type:
+            conditions.append(Document.doc_type == doc_type)
+
+        result = await self.session.execute(
+            select(Document)
+            .where(and_(*conditions))
+            .order_by(Document.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def update_document_status(
+        self,
+        document_id: str,
+        status: str,
+        error_message: str = None,
+        chunk_count: int = None,
+        token_count: int = None,
+    ) -> Optional[Document]:
+        """Update document processing status."""
+        result = await self.session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        document = result.scalar_one_or_none()
+        if not document:
+            return None
+
+        document.status = status
+        if error_message is not None:
+            document.error_message = error_message
+        if chunk_count is not None:
+            document.chunk_count = chunk_count
+        if token_count is not None:
+            document.token_count = token_count
+        if status == "completed":
+            document.processed_at = datetime.utcnow()
+
+        await self.session.flush()
+        await self.session.refresh(document)
+        return document
+
+    async def delete_document(self, document_id: str) -> bool:
+        """Soft delete a document."""
+        result = await self.session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        document = result.scalar_one_or_none()
+        if not document:
+            return False
+
+        # Soft delete
+        document.is_deleted = True
+        document.deleted_at = datetime.utcnow()
+
+        # Update knowledge base counts
+        await self.session.execute(
+            update(KnowledgeBase)
+            .where(KnowledgeBase.id == document.knowledge_base_id)
+            .values(
+                document_count=KnowledgeBase.document_count - 1,
+                chunk_count=KnowledgeBase.chunk_count - document.chunk_count,
+                total_tokens=KnowledgeBase.total_tokens - document.token_count,
+            )
+        )
+
+        await self.session.flush()
+        return True
+
+    async def add_chunk(
+        self,
+        document_id: str,
+        knowledge_base_id: str,
+        content: str,
+        chunk_index: int,
+        start_char: int = None,
+        end_char: int = None,
+        token_count: int = 0,
+        vector_id: str = None,
+        embedding_model: str = None,
+        chunk_metadata: Dict = None,
+    ) -> DocumentChunk:
+        """Add a chunk to a document."""
+        chunk = DocumentChunk(
+            document_id=document_id,
+            knowledge_base_id=knowledge_base_id,
+            content=content,
+            chunk_index=chunk_index,
+            start_char=start_char,
+            end_char=end_char,
+            token_count=token_count,
+            vector_id=vector_id,
+            embedding_model=embedding_model,
+            chunk_metadata=chunk_metadata,
+        )
+        self.session.add(chunk)
+        await self.session.flush()
+        await self.session.refresh(chunk)
+        return chunk
+
+    async def get_chunks(
+        self,
+        document_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[DocumentChunk]:
+        """Get chunks for a document."""
+        result = await self.session.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_index)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+
+# =============================================================================
+# Campaign Repository
+# =============================================================================
+
+
+class CampaignRepository(BaseRepository[Campaign]):
+    """Repository for Campaign entities."""
+
+    model = Campaign
+
+    async def list_by_organization(
+        self,
+        organization_id: str,
+        status: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[Campaign]:
+        """List campaigns by organization."""
+        conditions = [
+            Campaign.organization_id == organization_id,
+            Campaign.is_deleted == False,
+        ]
+        if status:
+            conditions.append(Campaign.status == status)
+
+        result = await self.session.execute(
+            select(Campaign)
+            .where(and_(*conditions))
+            .order_by(Campaign.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_organization(
+        self,
+        organization_id: str,
+        status: str = None,
+    ) -> int:
+        """Count campaigns by organization."""
+        conditions = [
+            Campaign.organization_id == organization_id,
+            Campaign.is_deleted == False,
+        ]
+        if status:
+            conditions.append(Campaign.status == status)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Campaign)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
+    async def get_with_contacts(self, id: str) -> Optional[Campaign]:
+        """Get campaign with contacts."""
+        result = await self.session.execute(
+            select(Campaign)
+            .options(selectinload(Campaign.contacts))
+            .where(Campaign.id == id)
+        )
+        return result.scalar_one_or_none()
+
+    async def update_status(
+        self,
+        campaign_id: str,
+        status: str,
+    ) -> Optional[Campaign]:
+        """Update campaign status."""
+        campaign = await self.get_by_id(campaign_id)
+        if not campaign:
+            return None
+
+        campaign.status = status
+
+        if status == "running" and not campaign.started_at:
+            campaign.started_at = datetime.utcnow()
+        elif status == "paused":
+            campaign.paused_at = datetime.utcnow()
+        elif status in ["completed", "canceled"]:
+            campaign.completed_at = datetime.utcnow()
+
+        await self.session.flush()
+        await self.session.refresh(campaign)
+        return campaign
+
+    async def add_contact(
+        self,
+        campaign_id: str,
+        organization_id: str,
+        phone_number: str,
+        first_name: str = None,
+        last_name: str = None,
+        email: str = None,
+        context: Dict = None,
+        extra_data: Dict = None,
+    ) -> CampaignContact:
+        """Add a contact to campaign."""
+        contact = CampaignContact(
+            campaign_id=campaign_id,
+            organization_id=organization_id,
+            phone_number=phone_number,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            context=context,
+            extra_data=extra_data,
+            status="pending",
+        )
+        self.session.add(contact)
+
+        # Update contact count
+        await self.session.execute(
+            update(Campaign)
+            .where(Campaign.id == campaign_id)
+            .values(
+                total_contacts=Campaign.total_contacts + 1,
+                calls_pending=Campaign.calls_pending + 1,
+            )
+        )
+
+        await self.session.flush()
+        await self.session.refresh(contact)
+        return contact
+
+    async def add_contacts_bulk(
+        self,
+        campaign_id: str,
+        organization_id: str,
+        contacts: List[Dict],
+    ) -> int:
+        """Add multiple contacts to campaign."""
+        added = 0
+        for contact_data in contacts:
+            try:
+                contact = CampaignContact(
+                    campaign_id=campaign_id,
+                    organization_id=organization_id,
+                    phone_number=contact_data["phone_number"],
+                    first_name=contact_data.get("first_name"),
+                    last_name=contact_data.get("last_name"),
+                    email=contact_data.get("email"),
+                    context=contact_data.get("context"),
+                    extra_data=contact_data.get("extra_data"),
+                    status="pending",
+                )
+                self.session.add(contact)
+                added += 1
+            except Exception:
+                continue
+
+        if added > 0:
+            await self.session.execute(
+                update(Campaign)
+                .where(Campaign.id == campaign_id)
+                .values(
+                    total_contacts=Campaign.total_contacts + added,
+                    calls_pending=Campaign.calls_pending + added,
+                )
+            )
+            await self.session.flush()
+
+        return added
+
+    async def list_contacts(
+        self,
+        campaign_id: str,
+        status: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[CampaignContact]:
+        """List contacts in campaign."""
+        conditions = [CampaignContact.campaign_id == campaign_id]
+        if status:
+            conditions.append(CampaignContact.status == status)
+
+        result = await self.session.execute(
+            select(CampaignContact)
+            .where(and_(*conditions))
+            .order_by(CampaignContact.created_at)
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_contacts(
+        self,
+        campaign_id: str,
+        status: str = None,
+    ) -> int:
+        """Count contacts in campaign."""
+        conditions = [CampaignContact.campaign_id == campaign_id]
+        if status:
+            conditions.append(CampaignContact.status == status)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(CampaignContact)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
+    async def get_next_contact(self, campaign_id: str) -> Optional[CampaignContact]:
+        """Get next contact to call."""
+        result = await self.session.execute(
+            select(CampaignContact)
+            .where(
+                and_(
+                    CampaignContact.campaign_id == campaign_id,
+                    CampaignContact.status == "pending",
+                    or_(
+                        CampaignContact.next_attempt_at == None,
+                        CampaignContact.next_attempt_at <= datetime.utcnow(),
+                    ),
+                )
+            )
+            .order_by(CampaignContact.created_at)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def update_contact_status(
+        self,
+        contact_id: str,
+        status: str,
+        call_id: str = None,
+        call_outcome: str = None,
+        call_duration_seconds: float = None,
+        call_cost: float = None,
+        next_attempt_at: datetime = None,
+        notes: str = None,
+    ) -> Optional[CampaignContact]:
+        """Update contact call status."""
+        result = await self.session.execute(
+            select(CampaignContact).where(CampaignContact.id == contact_id)
+        )
+        contact = result.scalar_one_or_none()
+        if not contact:
+            return None
+
+        old_status = contact.status
+        contact.status = status
+        contact.attempt_count += 1
+        contact.last_attempt_at = datetime.utcnow()
+
+        if call_id:
+            contact.call_id = call_id
+        if call_outcome:
+            contact.call_outcome = call_outcome
+        if call_duration_seconds is not None:
+            contact.call_duration_seconds = call_duration_seconds
+        if call_cost is not None:
+            contact.call_cost = call_cost
+        if next_attempt_at:
+            contact.next_attempt_at = next_attempt_at
+        if notes:
+            contact.notes = notes
+
+        # Update campaign stats
+        campaign = await self.get_by_id(contact.campaign_id)
+        if campaign:
+            if old_status == "pending" or old_status == "queued":
+                campaign.calls_pending = max(0, campaign.calls_pending - 1)
+
+            if status == "completed":
+                campaign.calls_completed += 1
+                if call_outcome == "answered":
+                    campaign.calls_successful += 1
+            elif status == "failed":
+                campaign.calls_failed += 1
+            elif status == "calling":
+                campaign.calls_in_progress += 1
+
+            if call_duration_seconds:
+                campaign.total_minutes += call_duration_seconds / 60.0
+            if call_cost:
+                campaign.total_cost += call_cost
+
+        await self.session.flush()
+        await self.session.refresh(contact)
+        return contact
+
+    async def get_stats(self, campaign_id: str) -> Dict[str, Any]:
+        """Get campaign statistics."""
+        campaign = await self.get_by_id(campaign_id)
+        if not campaign:
+            return {}
+
+        total = campaign.total_contacts or 1
+        completed = campaign.calls_completed or 0
+        successful = campaign.calls_successful or 0
+
+        return {
+            "total_contacts": campaign.total_contacts,
+            "calls_completed": completed,
+            "calls_successful": successful,
+            "calls_failed": campaign.calls_failed,
+            "calls_pending": campaign.calls_pending,
+            "calls_in_progress": campaign.calls_in_progress,
+            "completion_rate": round(completed / total * 100, 2),
+            "success_rate": round(successful / max(completed, 1) * 100, 2),
+            "total_minutes": round(campaign.total_minutes, 2),
+            "total_cost": round(campaign.total_cost, 2),
+        }
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
@@ -1024,4 +1861,8 @@ __all__ = [
     "ConversationRepository",
     "CallRepository",
     "AnalyticsRepository",
+    "PhoneNumberRepository",
+    "WebhookRepository",
+    "KnowledgeBaseRepository",
+    "CampaignRepository",
 ]
