@@ -160,6 +160,31 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         parts = [self.first_name, self.last_name]
         return " ".join(p for p in parts if p) or self.email
 
+    @property
+    def name(self) -> str:
+        """Get full name (alias for full_name)."""
+        return self.full_name
+
+    @name.setter
+    def name(self, value: str) -> None:
+        """Set name by splitting into first/last."""
+        parts = value.strip().split(" ", 1)
+        self.first_name = parts[0]
+        self.last_name = parts[1] if len(parts) > 1 else None
+
+    def set_password(self, password: str) -> None:
+        """Hash and set the user's password."""
+        import hashlib
+        # Simple hash for MVP - use bcrypt/argon2 in production
+        self.password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+    def verify_password(self, password: str) -> bool:
+        """Verify the user's password."""
+        import hashlib
+        if not self.password_hash:
+            return False
+        return self.password_hash == hashlib.sha256(password.encode()).hexdigest()
+
 
 class APIKey(Base, TimestampMixin, SoftDeleteMixin):
     """API key model."""

@@ -48,6 +48,7 @@ from .routes import (
     campaigns_router,
     webhooks_router,
     analytics_router,
+    auth_router,
 )
 
 # Database imports
@@ -394,6 +395,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         return {"status": "ready"}
 
     # API routes
+    app.include_router(auth_router, prefix=config.api_prefix)
     app.include_router(agents_router, prefix=config.api_prefix)
     app.include_router(calls_router, prefix=config.api_prefix)
     app.include_router(knowledge_router, prefix=config.api_prefix)
