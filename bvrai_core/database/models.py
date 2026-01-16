@@ -218,19 +218,30 @@ class Agent(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     # Basic info
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    slug: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Configuration
     system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     first_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # LLM Configuration
+    # JSON Configuration (flexible storage)
+    voice_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    llm_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    behavior_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    transcription_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # Knowledge bases and tools
+    knowledge_base_ids: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
+    functions: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
+
+    # Legacy LLM Configuration (for backwards compatibility)
     llm_provider: Mapped[str] = mapped_column(String(50), default="openai")
     llm_model: Mapped[str] = mapped_column(String(100), default="gpt-4")
     llm_temperature: Mapped[float] = mapped_column(Float, default=0.7)
     llm_max_tokens: Mapped[int] = mapped_column(Integer, default=150)
 
-    # Voice Configuration
+    # Legacy Voice Configuration
     voice_config_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
     # Status
@@ -248,7 +259,8 @@ class Agent(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     total_minutes: Mapped[float] = mapped_column(Float, default=0.0)
 
     # Metadata
-    metadata_json: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    metadata: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)  # Legacy
     tags: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
 
     # Relationships
@@ -256,10 +268,8 @@ class Agent(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     versions = relationship("AgentVersion", back_populates="agent")
     conversations = relationship("Conversation", back_populates="agent")
     calls = relationship("Call", back_populates="agent")
-    voice_config = relationship("VoiceConfigurationModel", back_populates="agent", uselist=False)
 
     __table_args__ = (
-        UniqueConstraint("organization_id", "slug", name="uq_agent_org_slug"),
         Index("ix_agents_organization_id", "organization_id"),
         Index("ix_agents_is_active", "is_active"),
     )

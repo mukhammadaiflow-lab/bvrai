@@ -9,13 +9,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, Optional
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import Depends, FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import (
     APIException,
@@ -49,8 +50,35 @@ from .routes import (
     analytics_router,
 )
 
+# Database imports
+from ..database.base import (
+    init_database,
+    close_database,
+    get_database,
+    get_session,
+)
+
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Database Dependency
+# =============================================================================
+
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency for database sessions.
+
+    Usage in routes:
+        @router.get("/items")
+        async def list_items(db: AsyncSession = Depends(get_db_session)):
+            repo = ItemRepository(db)
+            return await repo.get_all()
+    """
+    async with get_session() as session:
+        yield session
 
 
 # =============================================================================
@@ -70,6 +98,11 @@ class AppConfig(BaseModel):
     # Server settings
     debug: bool = False
     docs_enabled: bool = True
+
+    # Database
+    database_url: str = "sqlite+aiosqlite:///./bvrai.db"
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
 
     # CORS - SECURITY: Never use "*" with credentials=True
     cors_origins: list = [
@@ -99,10 +132,16 @@ class AppConfig(BaseModel):
         """Load configuration from environment variables."""
         return cls(
             debug=os.getenv("DEBUG", "false").lower() == "true",
+            database_url=os.getenv(
+                "DATABASE_URL",
+                "sqlite+aiosqlite:///./bvrai.db"
+            ),
+            database_pool_size=int(os.getenv("DATABASE_POOL_SIZE", "5")),
+            database_max_overflow=int(os.getenv("DATABASE_MAX_OVERFLOW", "10")),
             jwt_secret=os.getenv("JWT_SECRET"),
             rate_limit_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")),
             rate_limit_per_day=int(os.getenv("RATE_LIMIT_PER_DAY", "10000")),
-            cors_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+            cors_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000").split(","),
         )
 
 
@@ -219,9 +258,33 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         # Startup
         logger.info("Starting Builder Engine API...")
+
+        # Initialize database
+        logger.info(f"Initializing database connection...")
+        db = init_database(
+            database_url=config.database_url,
+            pool_size=config.database_pool_size,
+            max_overflow=config.database_max_overflow,
+            echo=config.debug,
+        )
+
+        # Create tables if they don't exist (for development)
+        if config.debug or "sqlite" in config.database_url:
+            logger.info("Creating database tables...")
+            await db.create_all()
+
+        # Verify database connectivity
+        if await db.health_check():
+            logger.info("Database connection established successfully")
+        else:
+            logger.error("Database connection failed!")
+
         yield
+
         # Shutdown
         logger.info("Shutting down Builder Engine API...")
+        await close_database()
+        logger.info("Database connection closed")
 
     # Create app
     app = FastAPI(
@@ -295,19 +358,39 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     @app.get("/health", response_model=HealthResponse, tags=["Health"])
     async def health_check():
         """Health check endpoint."""
+        # Check database connectivity
+        try:
+            db = get_database()
+            db_healthy = await db.health_check()
+        except Exception:
+            db_healthy = False
+
         return HealthResponse(
-            status="healthy",
+            status="healthy" if db_healthy else "degraded",
             version=config.version,
             timestamp=datetime.utcnow(),
             checks={
                 "api": "ok",
+                "database": "ok" if db_healthy else "error",
             },
         )
 
     @app.get("/ready", tags=["Health"])
     async def readiness_check():
         """Readiness check for Kubernetes."""
-        # In production, check database, cache, etc.
+        try:
+            db = get_database()
+            db_healthy = await db.health_check()
+            if not db_healthy:
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "not_ready", "reason": "database_unavailable"}
+                )
+        except Exception as e:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "reason": str(e)}
+            )
         return {"status": "ready"}
 
     # API routes
@@ -423,7 +506,7 @@ def run_server(
     import uvicorn
 
     uvicorn.run(
-        "platform.api.app:app",
+        "bvrai_core.api.app:app",
         host=host,
         port=port,
         reload=reload,

@@ -333,6 +333,50 @@ class AgentRepository(BaseRepository[Agent]):
             )
         )
 
+    async def get_by_organization(
+        self,
+        organization_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool = None,
+    ) -> List[Agent]:
+        """Get agents by organization with filters."""
+        conditions = [
+            Agent.organization_id == organization_id,
+            Agent.is_deleted == False,
+        ]
+        if is_active is not None:
+            conditions.append(Agent.is_active == is_active)
+
+        result = await self.session.execute(
+            select(Agent)
+            .where(and_(*conditions))
+            .order_by(Agent.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_organization(
+        self,
+        organization_id: str,
+        is_active: bool = None,
+    ) -> int:
+        """Count agents by organization."""
+        conditions = [
+            Agent.organization_id == organization_id,
+            Agent.is_deleted == False,
+        ]
+        if is_active is not None:
+            conditions.append(Agent.is_active == is_active)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Agent)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
     async def create_version(
         self,
         agent_id: str,
@@ -344,28 +388,101 @@ class AgentRepository(BaseRepository[Agent]):
         if not agent:
             raise ValueError(f"Agent not found: {agent_id}")
 
+        # Get current version number
+        current_version = getattr(agent, 'current_version', 0) or 0
+
         version = AgentVersion(
             agent_id=agent_id,
-            version_number=agent.current_version + 1,
-            system_prompt=agent.system_prompt,
-            first_message=agent.first_message,
-            llm_provider=agent.llm_provider,
-            llm_model=agent.llm_model,
-            llm_temperature=agent.llm_temperature,
+            version_number=current_version + 1,
             config_snapshot={
-                "llm_max_tokens": agent.llm_max_tokens,
-                "voice_config_id": agent.voice_config_id,
-                "metadata": agent.metadata_json,
+                "system_prompt": agent.system_prompt,
+                "first_message": agent.first_message,
+                "voice_config": agent.voice_config,
+                "llm_config": agent.llm_config,
+                "behavior_config": agent.behavior_config,
+                "transcription_config": agent.transcription_config,
+                "knowledge_base_ids": agent.knowledge_base_ids,
+                "functions": agent.functions,
+                "metadata": agent.metadata,
             },
             change_notes=change_notes,
-            created_by_user_id=created_by_user_id,
+            created_by=created_by_user_id,
         )
 
         self.session.add(version)
-        agent.current_version += 1
+
+        # Update agent version
+        if hasattr(agent, 'current_version'):
+            agent.current_version = current_version + 1
 
         await self.session.flush()
         return version
+
+    async def get_versions(
+        self,
+        agent_id: str,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[AgentVersion]:
+        """Get version history for an agent."""
+        result = await self.session.execute(
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent_id)
+            .order_by(AgentVersion.version_number.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def rollback_to_version(
+        self,
+        agent_id: str,
+        version_id: str,
+    ) -> Optional[Agent]:
+        """Rollback agent to a previous version."""
+        # Get the version
+        version_result = await self.session.execute(
+            select(AgentVersion)
+            .where(
+                and_(
+                    AgentVersion.id == version_id,
+                    AgentVersion.agent_id == agent_id,
+                )
+            )
+        )
+        version = version_result.scalar_one_or_none()
+
+        if not version:
+            return None
+
+        agent = await self.get_by_id(agent_id)
+        if not agent:
+            return None
+
+        # Restore from snapshot
+        snapshot = version.config_snapshot or {}
+        if "system_prompt" in snapshot:
+            agent.system_prompt = snapshot["system_prompt"]
+        if "first_message" in snapshot:
+            agent.first_message = snapshot["first_message"]
+        if "voice_config" in snapshot:
+            agent.voice_config = snapshot["voice_config"]
+        if "llm_config" in snapshot:
+            agent.llm_config = snapshot["llm_config"]
+        if "behavior_config" in snapshot:
+            agent.behavior_config = snapshot["behavior_config"]
+        if "transcription_config" in snapshot:
+            agent.transcription_config = snapshot["transcription_config"]
+        if "knowledge_base_ids" in snapshot:
+            agent.knowledge_base_ids = snapshot["knowledge_base_ids"]
+        if "functions" in snapshot:
+            agent.functions = snapshot["functions"]
+        if "metadata" in snapshot:
+            agent.metadata = snapshot["metadata"]
+
+        await self.session.flush()
+        await self.session.refresh(agent)
+        return agent
 
 
 # =============================================================================
@@ -526,6 +643,7 @@ class CallRepository(BaseRepository[Call]):
     async def list_by_organization(
         self,
         organization_id: str,
+        agent_id: str = None,
         status: str = None,
         direction: str = None,
         start_date: datetime = None,
@@ -539,21 +657,64 @@ class CallRepository(BaseRepository[Call]):
             Call.is_deleted == False,
         ]
 
+        if agent_id:
+            conditions.append(Call.agent_id == agent_id)
         if status:
             conditions.append(Call.status == status)
         if direction:
             conditions.append(Call.direction == direction)
         if start_date:
-            conditions.append(Call.initiated_at >= start_date)
+            conditions.append(Call.created_at >= start_date)
         if end_date:
-            conditions.append(Call.initiated_at <= end_date)
+            conditions.append(Call.created_at <= end_date)
 
         result = await self.session.execute(
             select(Call)
             .where(and_(*conditions))
-            .order_by(Call.initiated_at.desc())
+            .order_by(Call.created_at.desc())
             .offset(skip)
             .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_by_organization(
+        self,
+        organization_id: str,
+        agent_id: str = None,
+        status: str = None,
+    ) -> int:
+        """Count calls by organization."""
+        conditions = [
+            Call.organization_id == organization_id,
+            Call.is_deleted == False,
+        ]
+
+        if agent_id:
+            conditions.append(Call.agent_id == agent_id)
+        if status:
+            conditions.append(Call.status == status)
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Call)
+            .where(and_(*conditions))
+        )
+        return result.scalar_one()
+
+    async def get_events(
+        self,
+        call_id: str,
+        event_type: str = None,
+    ) -> List[CallEvent]:
+        """Get events for a call."""
+        conditions = [CallEvent.call_id == call_id]
+        if event_type:
+            conditions.append(CallEvent.event_type == event_type)
+
+        result = await self.session.execute(
+            select(CallEvent)
+            .where(and_(*conditions))
+            .order_by(CallEvent.relative_time_ms)
         )
         return list(result.scalars().all())
 

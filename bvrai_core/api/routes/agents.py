@@ -5,11 +5,13 @@ This module provides REST API endpoints for managing voice agents.
 """
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..base import (
     APIResponse,
@@ -26,6 +28,8 @@ from ..auth import (
     Permission,
     require_permission,
 )
+from ..dependencies import get_db_session
+from ...database.repositories import AgentRepository
 
 
 logger = logging.getLogger(__name__)
@@ -46,7 +50,7 @@ class VoiceConfig(BaseModel):
         description="Voice provider",
     )
     voice_id: str = Field(
-        ...,
+        default="default",
         description="Voice ID from provider",
     )
     speed: float = Field(
@@ -103,39 +107,31 @@ class LLMConfig(BaseModel):
 class BehaviorConfig(BaseModel):
     """Behavior configuration for an agent."""
 
-    greeting_message: Optional[str] = Field(
-        default=None,
-        description="Custom greeting message",
-    )
-    end_call_message: Optional[str] = Field(
-        default=None,
-        description="Message before ending call",
-    )
-    silence_timeout_seconds: int = Field(
-        default=10,
-        ge=5,
-        le=60,
-        description="Seconds of silence before prompting",
-    )
-    max_call_duration_seconds: int = Field(
-        default=1800,
-        ge=60,
-        le=7200,
-        description="Maximum call duration",
-    )
-    interruption_sensitivity: float = Field(
+    interrupt_sensitivity: float = Field(
         default=0.5,
         ge=0.0,
         le=1.0,
-        description="How easily agent can be interrupted",
+        description="How sensitive to interruptions",
     )
-    enable_voicemail_detection: bool = Field(
-        default=True,
-        description="Detect and handle voicemail",
+    silence_timeout_ms: int = Field(
+        default=1500,
+        ge=500,
+        le=10000,
+        description="Silence timeout before agent speaks",
     )
-    voicemail_action: str = Field(
-        default="leave_message",
-        description="Action when voicemail detected",
+    max_turn_duration_ms: int = Field(
+        default=30000,
+        ge=5000,
+        le=120000,
+        description="Maximum turn duration",
+    )
+    end_call_phrases: List[str] = Field(
+        default_factory=lambda: ["goodbye", "bye", "end call"],
+        description="Phrases that end the call",
+    )
+    transfer_phrases: List[str] = Field(
+        default_factory=lambda: ["transfer me", "speak to human", "talk to agent"],
+        description="Phrases that trigger transfer",
     )
 
 
@@ -144,17 +140,17 @@ class TranscriptionConfig(BaseModel):
 
     provider: str = Field(
         default="deepgram",
-        description="STT provider",
+        description="Transcription provider",
     )
     language: str = Field(
         default="en-US",
-        description="Language code",
+        description="Primary language",
     )
-    enable_punctuation: bool = Field(
+    punctuate: bool = Field(
         default=True,
-        description="Enable auto-punctuation",
+        description="Add punctuation",
     )
-    enable_profanity_filter: bool = Field(
+    profanity_filter: bool = Field(
         default=False,
         description="Filter profanity",
     )
@@ -174,24 +170,18 @@ class AgentCreateRequest(BaseModel):
         max_length=500,
         description="Agent description",
     )
-
-    # System prompt
     system_prompt: str = Field(
         ...,
         min_length=10,
         description="System prompt defining agent behavior",
     )
-
-    # First message
     first_message: Optional[str] = Field(
         default=None,
-        description="First message when answering calls",
+        description="First message when call starts",
     )
-
-    # Industry
     industry: Optional[str] = Field(
         default=None,
-        description="Industry type for specialized behavior",
+        description="Industry vertical",
     )
 
     # Configuration
@@ -234,19 +224,9 @@ class AgentCreateRequest(BaseModel):
 class AgentUpdateRequest(BaseModel):
     """Request to update an agent."""
 
-    name: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        max_length=100,
-    )
-    description: Optional[str] = Field(
-        default=None,
-        max_length=500,
-    )
-    system_prompt: Optional[str] = Field(
-        default=None,
-        min_length=10,
-    )
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
+    system_prompt: Optional[str] = Field(default=None, min_length=10)
     first_message: Optional[str] = None
     industry: Optional[str] = None
     voice: Optional[VoiceConfig] = None
@@ -297,7 +277,7 @@ class AgentResponse(BaseModel):
     total_minutes: float = 0.0
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class AgentSummary(BaseModel):
@@ -313,74 +293,54 @@ class AgentSummary(BaseModel):
     updated_at: datetime
 
 
-class AgentFromBusinessRequest(BaseModel):
-    """Request to generate agent from business information."""
-
-    business_name: str = Field(..., description="Business name")
-    business_type: str = Field(..., description="Type of business")
-    industry: str = Field(..., description="Industry")
-
-    # Business details
-    description: Optional[str] = Field(
-        default=None,
-        description="Business description",
-    )
-    services: List[str] = Field(
-        default_factory=list,
-        description="Services offered",
-    )
-    hours_of_operation: Optional[Dict[str, str]] = Field(
-        default=None,
-        description="Business hours",
-    )
-    address: Optional[str] = Field(
-        default=None,
-        description="Business address",
-    )
-    phone: Optional[str] = Field(
-        default=None,
-        description="Business phone",
-    )
-    website: Optional[str] = Field(
-        default=None,
-        description="Business website",
-    )
-
-    # Branding
-    tone: str = Field(
-        default="professional",
-        description="Desired tone (professional, friendly, formal)",
-    )
-    key_phrases: List[str] = Field(
-        default_factory=list,
-        description="Key phrases to use",
-    )
-
-    # Agent name
-    agent_name: Optional[str] = Field(
-        default=None,
-        description="Name for the agent persona",
-    )
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 
-class AgentTestRequest(BaseModel):
-    """Request to test an agent."""
+def agent_to_response(agent) -> dict:
+    """Convert database agent model to response dict."""
+    # Parse JSON configs or use defaults
+    voice_config = agent.voice_config if isinstance(agent.voice_config, dict) else {}
+    llm_config = agent.llm_config if isinstance(agent.llm_config, dict) else {}
+    behavior_config = agent.behavior_config if isinstance(agent.behavior_config, dict) else {}
+    transcription_config = agent.transcription_config if isinstance(agent.transcription_config, dict) else {}
 
-    message: str = Field(..., description="Test message to send")
-    context: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional context",
-    )
+    return {
+        "id": agent.id,
+        "organization_id": agent.organization_id,
+        "name": agent.name,
+        "description": agent.description,
+        "system_prompt": agent.system_prompt or "",
+        "first_message": agent.first_message,
+        "industry": agent.industry,
+        "voice": VoiceConfig(**voice_config).dict() if voice_config else VoiceConfig().dict(),
+        "llm": LLMConfig(**llm_config).dict() if llm_config else LLMConfig().dict(),
+        "behavior": BehaviorConfig(**behavior_config).dict() if behavior_config else BehaviorConfig().dict(),
+        "transcription": TranscriptionConfig(**transcription_config).dict() if transcription_config else TranscriptionConfig().dict(),
+        "knowledge_base_ids": agent.knowledge_base_ids or [],
+        "functions": agent.functions or [],
+        "is_active": agent.is_active,
+        "metadata": agent.metadata or {},
+        "created_at": agent.created_at,
+        "updated_at": agent.updated_at,
+        "total_calls": agent.total_calls or 0,
+        "total_minutes": agent.total_minutes or 0.0,
+    }
 
 
-class AgentTestResponse(BaseModel):
-    """Response from agent test."""
-
-    input_message: str
-    response: str
-    response_time_ms: float
-    tokens_used: int
-    functions_called: List[Dict[str, Any]] = []
+def agent_to_summary(agent) -> dict:
+    """Convert database agent model to summary dict."""
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "description": agent.description,
+        "industry": agent.industry,
+        "is_active": agent.is_active,
+        "total_calls": agent.total_calls or 0,
+        "created_at": agent.created_at,
+        "updated_at": agent.updated_at,
+    }
 
 
 # =============================================================================
@@ -398,35 +358,34 @@ class AgentTestResponse(BaseModel):
 async def create_agent(
     request: AgentCreateRequest,
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Create a new voice agent."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    # In production, this would:
-    # 1. Validate voice_id with provider
-    # 2. Create agent in database
-    # 3. Initialize agent runtime
+    repo = AgentRepository(db)
 
-    agent = AgentResponse(
-        id="agt_" + "x" * 24,
+    # Create agent in database
+    agent = await repo.create(
         organization_id=auth.organization_id,
         name=request.name,
         description=request.description,
         system_prompt=request.system_prompt,
         first_message=request.first_message,
         industry=request.industry,
-        voice=request.voice or VoiceConfig(voice_id="default"),
-        llm=request.llm or LLMConfig(),
-        behavior=request.behavior or BehaviorConfig(),
-        transcription=request.transcription or TranscriptionConfig(),
+        voice_config=(request.voice or VoiceConfig()).dict(),
+        llm_config=(request.llm or LLMConfig()).dict(),
+        behavior_config=(request.behavior or BehaviorConfig()).dict(),
+        transcription_config=(request.transcription or TranscriptionConfig()).dict(),
         knowledge_base_ids=request.knowledge_base_ids,
         functions=request.functions,
         metadata=request.metadata,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        is_active=True,
     )
 
-    return success_response(agent.dict())
+    logger.info(f"Created agent {agent.id} for org {auth.organization_id}")
+
+    return success_response(agent_to_response(agent))
 
 
 @router.get(
@@ -442,18 +401,30 @@ async def list_agents(
     industry: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """List all agents."""
     auth.require_permission(Permission.AGENTS_READ)
 
-    # In production, this would query the database
-    agents = []  # Query results
+    repo = AgentRepository(db)
+
+    # Get agents for organization
+    skip = (page - 1) * page_size
+    agents = await repo.get_by_organization(
+        organization_id=auth.organization_id,
+        skip=skip,
+        limit=page_size,
+        is_active=is_active,
+    )
+
+    # Get total count
+    total = await repo.count_by_organization(auth.organization_id, is_active=is_active)
 
     return paginated_response(
-        items=[a.dict() for a in agents],
+        items=[agent_to_summary(a) for a in agents],
         page=page,
         page_size=page_size,
-        total_items=0,
+        total_items=total,
     )
 
 
@@ -466,13 +437,22 @@ async def list_agents(
 async def get_agent(
     agent_id: str = Path(..., description="Agent ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Get agent by ID."""
     auth.require_permission(Permission.AGENTS_READ)
 
-    # In production, this would query the database
-    # For now, return not found
-    raise NotFoundError("Agent", agent_id)
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent:
+        raise NotFoundError("Agent", agent_id)
+
+    # Verify organization ownership
+    if agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    return success_response(agent_to_response(agent))
 
 
 @router.patch(
@@ -485,12 +465,55 @@ async def update_agent(
     agent_id: str = Path(..., description="Agent ID"),
     request: AgentUpdateRequest = Body(...),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Update an agent."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    # In production, this would update the database
-    raise NotFoundError("Agent", agent_id)
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    # Build update dict with only provided fields
+    update_data = {}
+    if request.name is not None:
+        update_data["name"] = request.name
+    if request.description is not None:
+        update_data["description"] = request.description
+    if request.system_prompt is not None:
+        update_data["system_prompt"] = request.system_prompt
+    if request.first_message is not None:
+        update_data["first_message"] = request.first_message
+    if request.industry is not None:
+        update_data["industry"] = request.industry
+    if request.voice is not None:
+        update_data["voice_config"] = request.voice.dict()
+    if request.llm is not None:
+        update_data["llm_config"] = request.llm.dict()
+    if request.behavior is not None:
+        update_data["behavior_config"] = request.behavior.dict()
+    if request.transcription is not None:
+        update_data["transcription_config"] = request.transcription.dict()
+    if request.knowledge_base_ids is not None:
+        update_data["knowledge_base_ids"] = request.knowledge_base_ids
+    if request.functions is not None:
+        update_data["functions"] = request.functions
+    if request.metadata is not None:
+        update_data["metadata"] = request.metadata
+    if request.is_active is not None:
+        update_data["is_active"] = request.is_active
+
+    if update_data:
+        agent = await repo.update(agent_id, **update_data)
+
+    logger.info(f"Updated agent {agent_id}")
+
+    return success_response(agent_to_response(agent))
 
 
 @router.delete(
@@ -502,14 +525,26 @@ async def update_agent(
 async def delete_agent(
     agent_id: str = Path(..., description="Agent ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Delete an agent."""
     auth.require_permission(Permission.AGENTS_DELETE)
 
-    # In production, this would:
-    # 1. Check no active calls
-    # 2. Soft delete or hard delete based on policy
-    raise NotFoundError("Agent", agent_id)
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    # Soft delete the agent
+    await repo.soft_delete(agent_id)
+
+    logger.info(f"Deleted agent {agent_id}")
+
+    return None
 
 
 @router.post(
@@ -523,150 +558,155 @@ async def duplicate_agent(
     agent_id: str = Path(..., description="Agent ID to duplicate"),
     name: str = Query(..., description="Name for the new agent"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Duplicate an agent."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    raise NotFoundError("Agent", agent_id)
+    repo = AgentRepository(db)
+    original = await repo.get_by_id(agent_id)
+
+    if not original:
+        raise NotFoundError("Agent", agent_id)
+
+    if original.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    # Create duplicate
+    duplicate = await repo.create(
+        organization_id=auth.organization_id,
+        name=name,
+        description=original.description,
+        system_prompt=original.system_prompt,
+        first_message=original.first_message,
+        industry=original.industry,
+        voice_config=original.voice_config,
+        llm_config=original.llm_config,
+        behavior_config=original.behavior_config,
+        transcription_config=original.transcription_config,
+        knowledge_base_ids=original.knowledge_base_ids,
+        functions=original.functions,
+        metadata=original.metadata,
+        is_active=True,
+    )
+
+    logger.info(f"Duplicated agent {agent_id} to {duplicate.id}")
+
+    return success_response(agent_to_response(duplicate))
 
 
 @router.post(
-    "/generate-from-business",
+    "/{agent_id}/publish",
     response_model=APIResponse[AgentResponse],
-    status_code=201,
-    summary="Generate Agent from Business Info",
-    description="Automatically generate an agent based on business information.",
+    summary="Publish Agent",
+    description="Publish agent changes and create a new version.",
 )
-async def generate_agent_from_business(
-    request: AgentFromBusinessRequest,
+async def publish_agent(
+    agent_id: str = Path(..., description="Agent ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """
-    Generate an AI voice agent from business information.
-
-    This uses the Agent Factory to:
-    1. Analyze the business type and industry
-    2. Generate appropriate persona and tone
-    3. Create system prompt with industry knowledge
-    4. Configure voice and behavior settings
-    """
+    """Publish agent changes."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    # In production, this would use the AgentFactory from platform/agent_factory
-    # from bvrai_core.agent_factory import AgentFactory, BusinessInfo
-    # factory = AgentFactory()
-    # result = await factory.create_agent(business_info)
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
 
-    # Placeholder response
-    return success_response({
-        "id": "agt_" + "x" * 24,
-        "name": request.agent_name or f"{request.business_name} Assistant",
-        "message": "Agent generation would happen here using AgentFactory",
-    })
+    if not agent:
+        raise NotFoundError("Agent", agent_id)
 
+    if agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
 
-@router.post(
-    "/{agent_id}/test",
-    response_model=APIResponse[AgentTestResponse],
-    summary="Test Agent",
-    description="Send a test message to an agent and get a response.",
-)
-async def test_agent(
-    agent_id: str = Path(..., description="Agent ID"),
-    request: AgentTestRequest = Body(...),
-    auth: AuthContext = Depends(),
-):
-    """Test an agent with a message."""
-    auth.require_permission(Permission.AGENTS_EXECUTE)
+    # Create a new version
+    await repo.create_version(agent_id)
 
-    # In production, this would:
-    # 1. Load agent configuration
-    # 2. Send message to LLM with system prompt
-    # 3. Return response with timing
+    # Update agent to active
+    agent = await repo.update(agent_id, is_active=True)
 
-    raise NotFoundError("Agent", agent_id)
+    logger.info(f"Published agent {agent_id}")
 
-
-@router.post(
-    "/{agent_id}/activate",
-    response_model=APIResponse[AgentResponse],
-    summary="Activate Agent",
-    description="Activate an agent so it can receive calls.",
-)
-async def activate_agent(
-    agent_id: str = Path(..., description="Agent ID"),
-    auth: AuthContext = Depends(),
-):
-    """Activate an agent."""
-    auth.require_permission(Permission.AGENTS_WRITE)
-
-    raise NotFoundError("Agent", agent_id)
-
-
-@router.post(
-    "/{agent_id}/deactivate",
-    response_model=APIResponse[AgentResponse],
-    summary="Deactivate Agent",
-    description="Deactivate an agent. It will no longer receive calls.",
-)
-async def deactivate_agent(
-    agent_id: str = Path(..., description="Agent ID"),
-    auth: AuthContext = Depends(),
-):
-    """Deactivate an agent."""
-    auth.require_permission(Permission.AGENTS_WRITE)
-
-    raise NotFoundError("Agent", agent_id)
-
-
-@router.get(
-    "/{agent_id}/stats",
-    response_model=APIResponse[Dict[str, Any]],
-    summary="Get Agent Stats",
-    description="Get usage statistics for an agent.",
-)
-async def get_agent_stats(
-    agent_id: str = Path(..., description="Agent ID"),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
-    auth: AuthContext = Depends(),
-):
-    """Get agent statistics."""
-    auth.require_permission(Permission.ANALYTICS_READ)
-
-    raise NotFoundError("Agent", agent_id)
+    return success_response(agent_to_response(agent))
 
 
 @router.get(
     "/{agent_id}/versions",
-    response_model=ListResponse[Dict[str, Any]],
-    summary="List Agent Versions",
-    description="List all versions/revisions of an agent.",
+    response_model=ListResponse[dict],
+    summary="Get Agent Versions",
+    description="Get version history for an agent.",
 )
-async def list_agent_versions(
+async def get_agent_versions(
     agent_id: str = Path(..., description="Agent ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """List agent version history."""
+    """Get agent version history."""
     auth.require_permission(Permission.AGENTS_READ)
 
-    raise NotFoundError("Agent", agent_id)
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    skip = (page - 1) * page_size
+    versions = await repo.get_versions(agent_id, skip=skip, limit=page_size)
+
+    # Convert to dict
+    version_dicts = []
+    for v in versions:
+        version_dicts.append({
+            "id": v.id,
+            "agent_id": v.agent_id,
+            "version_number": v.version_number,
+            "config_snapshot": v.config_snapshot,
+            "created_at": v.created_at,
+            "created_by": v.created_by,
+        })
+
+    return paginated_response(
+        items=version_dicts,
+        page=page,
+        page_size=page_size,
+        total_items=len(version_dicts),  # Would need a count query
+    )
 
 
 @router.post(
-    "/{agent_id}/versions/{version_id}/restore",
+    "/{agent_id}/versions/{version_id}/rollback",
     response_model=APIResponse[AgentResponse],
-    summary="Restore Agent Version",
-    description="Restore an agent to a previous version.",
+    summary="Rollback Agent",
+    description="Rollback agent to a previous version.",
 )
-async def restore_agent_version(
+async def rollback_agent(
     agent_id: str = Path(..., description="Agent ID"),
-    version_id: str = Path(..., description="Version ID to restore"),
+    version_id: str = Path(..., description="Version ID to rollback to"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """Restore an agent to a previous version."""
+    """Rollback agent to a previous version."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    raise NotFoundError("Agent", agent_id)
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    # Rollback to version
+    agent = await repo.rollback_to_version(agent_id, version_id)
+
+    if not agent:
+        raise NotFoundError("Version", version_id)
+
+    logger.info(f"Rolled back agent {agent_id} to version {version_id}")
+
+    return success_response(agent_to_response(agent))

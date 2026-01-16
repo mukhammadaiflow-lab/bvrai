@@ -7,9 +7,11 @@ This module provides REST API endpoints for managing voice calls.
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..base import (
     APIResponse,
@@ -23,6 +25,8 @@ from ..auth import (
     AuthContext,
     Permission,
 )
+from ..dependencies import get_db_session
+from ...database.repositories import CallRepository, AgentRepository
 
 
 logger = logging.getLogger(__name__)
@@ -31,28 +35,31 @@ router = APIRouter(prefix="/calls", tags=["Calls"])
 
 
 # =============================================================================
-# Request/Response Models
+# Enums
 # =============================================================================
 
 
-class CallDirection(str):
+class CallDirection(str, Enum):
     """Call direction types."""
-
     INBOUND = "inbound"
     OUTBOUND = "outbound"
 
 
-class CallStatus(str):
+class CallStatus(str, Enum):
     """Call status types."""
-
     QUEUED = "queued"
     RINGING = "ringing"
-    IN_PROGRESS = "in-progress"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
     BUSY = "busy"
-    NO_ANSWER = "no-answer"
+    NO_ANSWER = "no_answer"
     CANCELED = "canceled"
+
+
+# =============================================================================
+# Request/Response Models
+# =============================================================================
 
 
 class OutboundCallRequest(BaseModel):
@@ -63,8 +70,8 @@ class OutboundCallRequest(BaseModel):
         ...,
         description="Phone number to call (E.164 format)",
     )
-    from_phone_number: str = Field(
-        ...,
+    from_phone_number: Optional[str] = Field(
+        default=None,
         description="Caller ID phone number (E.164 format)",
     )
 
@@ -89,26 +96,6 @@ class OutboundCallRequest(BaseModel):
         default=True,
         description="Record the call",
     )
-    amd_enabled: bool = Field(
-        default=True,
-        description="Enable answering machine detection",
-    )
-    amd_action: str = Field(
-        default="leave_message",
-        description="Action when voicemail detected",
-    )
-
-    # Scheduling
-    schedule_time: Optional[datetime] = Field(
-        default=None,
-        description="Schedule call for future time",
-    )
-
-    # Webhook
-    webhook_url: Optional[str] = Field(
-        default=None,
-        description="Webhook URL for call events",
-    )
 
     # Metadata
     metadata: Dict[str, Any] = Field(
@@ -129,28 +116,20 @@ class CallResponse(BaseModel):
     status: str
 
     # Phone numbers
-    from_phone_number: str
+    from_phone_number: Optional[str] = None
     to_phone_number: str
 
-    # Timing
+    # Duration
     started_at: Optional[datetime] = None
-    answered_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
 
     # Recording
     recording_url: Optional[str] = None
-    recording_duration_seconds: Optional[int] = None
-
-    # Transcript
-    transcript_id: Optional[str] = None
-    transcript_available: bool = False
+    transcript_url: Optional[str] = None
 
     # Cost
     cost_cents: Optional[int] = None
-
-    # Call quality
-    amd_result: Optional[str] = None  # human, voicemail, unknown
 
     # Context
     context: Dict[str, Any] = {}
@@ -163,7 +142,7 @@ class CallResponse(BaseModel):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class CallSummary(BaseModel):
@@ -173,7 +152,7 @@ class CallSummary(BaseModel):
     agent_id: str
     direction: str
     status: str
-    from_phone_number: str
+    from_phone_number: Optional[str] = None
     to_phone_number: str
     duration_seconds: Optional[int] = None
     created_at: datetime
@@ -226,17 +205,46 @@ class CallTransferRequest(BaseModel):
     )
 
 
-class CallMessageRequest(BaseModel):
-    """Request to send a message during a call."""
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
-    message: str = Field(
-        ...,
-        description="Message to speak",
-    )
-    interrupt: bool = Field(
-        default=False,
-        description="Interrupt current speech",
-    )
+
+def call_to_response(call) -> dict:
+    """Convert database call model to response dict."""
+    return {
+        "id": call.id,
+        "organization_id": call.organization_id,
+        "agent_id": call.agent_id,
+        "direction": call.direction,
+        "status": call.status,
+        "from_phone_number": call.from_phone_number,
+        "to_phone_number": call.to_phone_number,
+        "started_at": call.started_at,
+        "ended_at": call.ended_at,
+        "duration_seconds": call.duration_seconds,
+        "recording_url": call.recording_url,
+        "transcript_url": getattr(call, 'transcript_url', None),
+        "cost_cents": call.cost_cents,
+        "context": call.context_json or {},
+        "metadata": call.metadata_json or {},
+        "created_at": call.created_at,
+        "updated_at": call.updated_at,
+    }
+
+
+def call_to_summary(call) -> dict:
+    """Convert database call model to summary dict."""
+    return {
+        "id": call.id,
+        "agent_id": call.agent_id,
+        "direction": call.direction,
+        "status": call.status,
+        "from_phone_number": call.from_phone_number,
+        "to_phone_number": call.to_phone_number,
+        "duration_seconds": call.duration_seconds,
+        "created_at": call.created_at,
+    }
 
 
 # =============================================================================
@@ -248,37 +256,43 @@ class CallMessageRequest(BaseModel):
     "/outbound",
     response_model=APIResponse[CallResponse],
     status_code=201,
-    summary="Create Outbound Call",
-    description="Initiate an outbound call using an agent.",
+    summary="Initiate Outbound Call",
+    description="Start an outbound call using an agent.",
 )
 async def create_outbound_call(
     request: OutboundCallRequest,
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """Create an outbound call."""
+    """Initiate an outbound call."""
     auth.require_permission(Permission.CALLS_WRITE)
 
-    # In production, this would:
-    # 1. Validate agent exists and is active
-    # 2. Validate phone numbers
-    # 3. Check credits/balance
-    # 4. Queue or initiate call via telephony provider
+    # Verify agent exists and belongs to organization
+    agent_repo = AgentRepository(db)
+    agent = await agent_repo.get_by_id(request.agent_id)
 
-    call = CallResponse(
-        id="call_" + "x" * 24,
+    if not agent or agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", request.agent_id)
+
+    # Create call record
+    call_repo = CallRepository(db)
+    call = await call_repo.create(
         organization_id=auth.organization_id,
         agent_id=request.agent_id,
-        direction=CallDirection.OUTBOUND,
-        status=CallStatus.QUEUED,
-        from_phone_number=request.from_phone_number,
+        direction=CallDirection.OUTBOUND.value,
+        status=CallStatus.QUEUED.value,
+        from_phone_number=request.from_phone_number or agent.phone_number,
         to_phone_number=request.to_phone_number,
-        context=request.context,
-        metadata=request.metadata,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        context_json=request.context,
+        metadata_json=request.metadata,
     )
 
-    return success_response(call.dict())
+    logger.info(f"Created outbound call {call.id} to {request.to_phone_number}")
+
+    # TODO: In production, initiate actual call via Twilio/telephony provider
+    # For now, we just create the record
+
+    return success_response(call_to_response(call))
 
 
 @router.get(
@@ -290,25 +304,42 @@ async def create_outbound_call(
 async def list_calls(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    agent_id: Optional[str] = Query(None, description="Filter by agent"),
-    direction: Optional[str] = Query(None, description="Filter by direction"),
-    status: Optional[str] = Query(None, description="Filter by status"),
-    start_date: Optional[datetime] = Query(None, description="Start date filter"),
-    end_date: Optional[datetime] = Query(None, description="End date filter"),
-    phone_number: Optional[str] = Query(None, description="Filter by phone number"),
+    agent_id: Optional[str] = Query(None),
+    direction: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """List all calls."""
     auth.require_permission(Permission.CALLS_READ)
 
-    # In production, this would query the database with filters
-    calls = []
+    repo = CallRepository(db)
+
+    skip = (page - 1) * page_size
+    calls = await repo.list_by_organization(
+        organization_id=auth.organization_id,
+        agent_id=agent_id,
+        status=status,
+        start_date=from_date,
+        end_date=to_date,
+        skip=skip,
+        limit=page_size,
+    )
+
+    # Get total count
+    total = await repo.count_by_organization(
+        organization_id=auth.organization_id,
+        agent_id=agent_id,
+        status=status,
+    )
 
     return paginated_response(
-        items=[c.dict() for c in calls],
+        items=[call_to_summary(c) for c in calls],
         page=page,
         page_size=page_size,
-        total_items=0,
+        total_items=total,
     )
 
 
@@ -321,11 +352,21 @@ async def list_calls(
 async def get_call(
     call_id: str = Path(..., description="Call ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Get call by ID."""
     auth.require_permission(Permission.CALLS_READ)
 
-    raise NotFoundError("Call", call_id)
+    repo = CallRepository(db)
+    call = await repo.get_by_id(call_id)
+
+    if not call:
+        raise NotFoundError("Call", call_id)
+
+    if call.organization_id != auth.organization_id:
+        raise NotFoundError("Call", call_id)
+
+    return success_response(call_to_response(call))
 
 
 @router.get(
@@ -337,43 +378,48 @@ async def get_call(
 async def get_call_transcript(
     call_id: str = Path(..., description="Call ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Get call transcript."""
-    auth.require_permission(Permission.TRANSCRIPTS_READ)
+    auth.require_permission(Permission.CALLS_READ)
 
-    raise NotFoundError("Call", call_id)
+    repo = CallRepository(db)
+    call = await repo.get_by_id(call_id)
 
+    if not call:
+        raise NotFoundError("Call", call_id)
 
-@router.get(
-    "/{call_id}/recording",
-    response_model=APIResponse[Dict[str, Any]],
-    summary="Get Call Recording",
-    description="Get the recording URL for a call.",
-)
-async def get_call_recording(
-    call_id: str = Path(..., description="Call ID"),
-    auth: AuthContext = Depends(),
-):
-    """Get call recording."""
-    auth.require_permission(Permission.RECORDINGS_READ)
+    if call.organization_id != auth.organization_id:
+        raise NotFoundError("Call", call_id)
 
-    raise NotFoundError("Call", call_id)
+    # Get transcript from events
+    events = await repo.get_events(call_id, event_type="transcript")
 
+    segments = []
+    full_text_parts = []
 
-@router.delete(
-    "/{call_id}/recording",
-    status_code=204,
-    summary="Delete Call Recording",
-    description="Delete a call recording.",
-)
-async def delete_call_recording(
-    call_id: str = Path(..., description="Call ID"),
-    auth: AuthContext = Depends(),
-):
-    """Delete call recording."""
-    auth.require_permission(Permission.RECORDINGS_DELETE)
+    for event in events:
+        event_data = event.event_data or {}
+        segment = TranscriptSegment(
+            speaker=event_data.get("speaker", "unknown"),
+            text=event_data.get("text", ""),
+            start_time_ms=event_data.get("start_time_ms", 0),
+            end_time_ms=event_data.get("end_time_ms", 0),
+            confidence=event_data.get("confidence", 1.0),
+        )
+        segments.append(segment)
+        full_text_parts.append(f"{segment.speaker}: {segment.text}")
 
-    raise NotFoundError("Call", call_id)
+    transcript = TranscriptResponse(
+        call_id=call_id,
+        segments=segments,
+        full_text="\n".join(full_text_parts),
+        duration_seconds=call.duration_seconds or 0,
+        language="en",
+        created_at=call.created_at,
+    )
+
+    return success_response(transcript.dict())
 
 
 @router.post(
@@ -386,144 +432,134 @@ async def end_call(
     call_id: str = Path(..., description="Call ID"),
     request: CallEndRequest = Body(default=CallEndRequest()),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """End an active call."""
     auth.require_permission(Permission.CALLS_WRITE)
 
-    # In production, this would:
-    # 1. Check call is active
-    # 2. Send hangup command to telephony provider
-    # 3. Update call status
+    repo = CallRepository(db)
+    call = await repo.get_by_id(call_id)
 
-    raise NotFoundError("Call", call_id)
+    if not call:
+        raise NotFoundError("Call", call_id)
+
+    if call.organization_id != auth.organization_id:
+        raise NotFoundError("Call", call_id)
+
+    # Update call status
+    call = await repo.update(
+        call_id,
+        status=CallStatus.COMPLETED.value,
+        ended_at=datetime.utcnow(),
+    )
+
+    # Calculate duration
+    if call.started_at and call.ended_at:
+        duration = int((call.ended_at - call.started_at).total_seconds())
+        call = await repo.update(call_id, duration_seconds=duration)
+
+    # Add end event
+    await repo.add_event(
+        call_id=call_id,
+        event_type="call_ended",
+        event_data={"reason": request.reason},
+    )
+
+    logger.info(f"Ended call {call_id}")
+
+    # TODO: In production, hang up actual call via telephony provider
+
+    return success_response(call_to_response(call))
 
 
 @router.post(
     "/{call_id}/transfer",
     response_model=APIResponse[CallResponse],
     summary="Transfer Call",
-    description="Transfer an active call to another phone number.",
+    description="Transfer an active call to another number.",
 )
 async def transfer_call(
     call_id: str = Path(..., description="Call ID"),
     request: CallTransferRequest = Body(...),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """Transfer an active call."""
     auth.require_permission(Permission.CALLS_WRITE)
 
-    raise NotFoundError("Call", call_id)
+    repo = CallRepository(db)
+    call = await repo.get_by_id(call_id)
 
+    if not call:
+        raise NotFoundError("Call", call_id)
 
-@router.post(
-    "/{call_id}/message",
-    response_model=APIResponse[Dict[str, Any]],
-    summary="Send Message",
-    description="Send a message to be spoken during an active call.",
-)
-async def send_call_message(
-    call_id: str = Path(..., description="Call ID"),
-    request: CallMessageRequest = Body(...),
-    auth: AuthContext = Depends(),
-):
-    """Send a message during a call."""
-    auth.require_permission(Permission.CALLS_WRITE)
+    if call.organization_id != auth.organization_id:
+        raise NotFoundError("Call", call_id)
 
-    raise NotFoundError("Call", call_id)
+    if call.status != CallStatus.IN_PROGRESS.value:
+        raise ValidationError(
+            "transfer_error",
+            f"Cannot transfer call in status: {call.status}"
+        )
 
+    # Add transfer event
+    await repo.add_event(
+        call_id=call_id,
+        event_type="transfer_initiated",
+        event_data={
+            "to_phone_number": request.to_phone_number,
+            "announce": request.announce,
+            "announcement_message": request.announcement_message,
+        },
+    )
 
-@router.post(
-    "/{call_id}/mute",
-    response_model=APIResponse[Dict[str, Any]],
-    summary="Mute Agent",
-    description="Mute the agent on an active call.",
-)
-async def mute_agent(
-    call_id: str = Path(..., description="Call ID"),
-    auth: AuthContext = Depends(),
-):
-    """Mute agent on call."""
-    auth.require_permission(Permission.CALLS_WRITE)
+    logger.info(f"Initiated transfer of call {call_id} to {request.to_phone_number}")
 
-    raise NotFoundError("Call", call_id)
+    # TODO: In production, initiate actual transfer via telephony provider
 
-
-@router.post(
-    "/{call_id}/unmute",
-    response_model=APIResponse[Dict[str, Any]],
-    summary="Unmute Agent",
-    description="Unmute the agent on an active call.",
-)
-async def unmute_agent(
-    call_id: str = Path(..., description="Call ID"),
-    auth: AuthContext = Depends(),
-):
-    """Unmute agent on call."""
-    auth.require_permission(Permission.CALLS_WRITE)
-
-    raise NotFoundError("Call", call_id)
+    return success_response(call_to_response(call))
 
 
 @router.get(
     "/{call_id}/events",
-    response_model=ListResponse[Dict[str, Any]],
+    response_model=ListResponse[dict],
     summary="Get Call Events",
     description="Get events/timeline for a call.",
 )
 async def get_call_events(
     call_id: str = Path(..., description="Call ID"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    event_type: Optional[str] = Query(None),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """Get call events/timeline."""
+    """Get call events."""
     auth.require_permission(Permission.CALLS_READ)
 
-    raise NotFoundError("Call", call_id)
+    repo = CallRepository(db)
+    call = await repo.get_by_id(call_id)
 
+    if not call:
+        raise NotFoundError("Call", call_id)
 
-@router.get(
-    "/active",
-    response_model=ListResponse[CallSummary],
-    summary="List Active Calls",
-    description="List all currently active calls.",
-)
-async def list_active_calls(
-    agent_id: Optional[str] = Query(None, description="Filter by agent"),
-    auth: AuthContext = Depends(),
-):
-    """List active calls."""
-    auth.require_permission(Permission.CALLS_READ)
+    if call.organization_id != auth.organization_id:
+        raise NotFoundError("Call", call_id)
+
+    events = await repo.get_events(call_id, event_type=event_type)
+
+    event_dicts = [
+        {
+            "id": e.id,
+            "call_id": e.call_id,
+            "event_type": e.event_type,
+            "event_data": e.event_data,
+            "timestamp": e.timestamp,
+        }
+        for e in events
+    ]
 
     return paginated_response(
-        items=[],
+        items=event_dicts,
         page=1,
-        page_size=100,
-        total_items=0,
+        page_size=len(event_dicts),
+        total_items=len(event_dicts),
     )
-
-
-@router.post(
-    "/batch",
-    response_model=APIResponse[Dict[str, Any]],
-    status_code=201,
-    summary="Create Batch Calls",
-    description="Create multiple outbound calls in batch.",
-)
-async def create_batch_calls(
-    calls: List[OutboundCallRequest] = Body(...),
-    auth: AuthContext = Depends(),
-):
-    """Create batch outbound calls."""
-    auth.require_permission(Permission.CALLS_WRITE)
-    auth.require_permission(Permission.CAMPAIGNS_EXECUTE)
-
-    if len(calls) > 100:
-        raise ValidationError("Maximum 100 calls per batch")
-
-    # In production, this would queue all calls for processing
-
-    return success_response({
-        "queued": len(calls),
-        "batch_id": "batch_" + "x" * 24,
-    })
