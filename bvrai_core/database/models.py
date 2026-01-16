@@ -226,7 +226,7 @@ class Agent(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     first_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # JSON Configuration (flexible storage)
-    voice_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+    voice_config_json: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
     llm_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
     behavior_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
     transcription_config: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
@@ -268,6 +268,7 @@ class Agent(Base, TimestampMixin, SoftDeleteMixin, AuditMixin):
     versions = relationship("AgentVersion", back_populates="agent")
     conversations = relationship("Conversation", back_populates="agent")
     calls = relationship("Call", back_populates="agent")
+    voice_config = relationship("VoiceConfigurationModel", back_populates="agent", uselist=False)
 
     __table_args__ = (
         Index("ix_agents_organization_id", "organization_id"),

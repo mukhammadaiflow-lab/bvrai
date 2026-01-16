@@ -301,7 +301,7 @@ class AgentSummary(BaseModel):
 def agent_to_response(agent) -> dict:
     """Convert database agent model to response dict."""
     # Parse JSON configs or use defaults
-    voice_config = agent.voice_config if isinstance(agent.voice_config, dict) else {}
+    voice_config = agent.voice_config_json if isinstance(agent.voice_config_json, dict) else {}
     llm_config = agent.llm_config if isinstance(agent.llm_config, dict) else {}
     behavior_config = agent.behavior_config if isinstance(agent.behavior_config, dict) else {}
     transcription_config = agent.transcription_config if isinstance(agent.transcription_config, dict) else {}
@@ -373,7 +373,7 @@ async def create_agent(
         system_prompt=request.system_prompt,
         first_message=request.first_message,
         industry=request.industry,
-        voice_config=(request.voice or VoiceConfig()).dict(),
+        voice_config_json=(request.voice or VoiceConfig()).dict(),
         llm_config=(request.llm or LLMConfig()).dict(),
         behavior_config=(request.behavior or BehaviorConfig()).dict(),
         transcription_config=(request.transcription or TranscriptionConfig()).dict(),
@@ -492,7 +492,7 @@ async def update_agent(
     if request.industry is not None:
         update_data["industry"] = request.industry
     if request.voice is not None:
-        update_data["voice_config"] = request.voice.dict()
+        update_data["voice_config_json"] = request.voice.dict()
     if request.llm is not None:
         update_data["llm_config"] = request.llm.dict()
     if request.behavior is not None:
@@ -580,7 +580,7 @@ async def duplicate_agent(
         system_prompt=original.system_prompt,
         first_message=original.first_message,
         industry=original.industry,
-        voice_config=original.voice_config,
+        voice_config_json=original.voice_config_json,
         llm_config=original.llm_config,
         behavior_config=original.behavior_config,
         transcription_config=original.transcription_config,
