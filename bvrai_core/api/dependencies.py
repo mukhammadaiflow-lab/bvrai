@@ -165,24 +165,27 @@ async def get_auth_context(
 
     # Build permissions set
     permissions: Set[Permission] = set()
-
-    # Get role permissions
     role = None
-    if db_key.role:
-        try:
-            role = Role(db_key.role)
-            role_perms = ROLE_PERMISSIONS.get(role, set())
-            permissions.update(role_perms)
-        except ValueError:
-            pass
 
-    # Add explicit permissions
-    if db_key.permissions:
-        for perm_str in db_key.permissions:
+    # Check scopes - "*" means full access
+    scopes = db_key.scopes or []
+    if "*" in scopes:
+        # Full access - grant all permissions via owner role
+        role = Role.OWNER
+        permissions = set(Permission)
+    else:
+        # Parse individual scopes as permissions
+        for scope in scopes:
             try:
-                permissions.add(Permission(perm_str))
+                permissions.add(Permission(scope))
             except ValueError:
-                pass
+                # Check if scope is a role
+                try:
+                    role = Role(scope)
+                    role_perms = ROLE_PERMISSIONS.get(role, set())
+                    permissions.update(role_perms)
+                except ValueError:
+                    pass
 
     # Update last used timestamp
     db_key.last_used_at = datetime.utcnow()
@@ -191,7 +194,7 @@ async def get_auth_context(
     return AuthContext(
         method=AuthMethod.API_KEY,
         is_authenticated=True,
-        user_id=db_key.user_id,
+        user_id=db_key.created_by_user_id,
         organization_id=db_key.organization_id,
         api_key_id=db_key.id,
         role=role,

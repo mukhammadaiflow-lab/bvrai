@@ -158,11 +158,11 @@ async def login(
     # Create or update API key for this user session
     api_key = APIKey(
         organization_id=user.organization_id,
-        user_id=user.id,
+        created_by_user_id=user.id,
         name=f"Session {datetime.utcnow().isoformat()}",
         key_hash=key_hash,
         key_prefix=key[:12],
-        role="owner",  # User gets full access
+        scopes=["*"],  # Full access
         is_active=True,
         expires_at=datetime.utcnow() + timedelta(hours=24),
     )
@@ -237,11 +237,11 @@ async def register(
 
     api_key = APIKey(
         organization_id=org.id,
-        user_id=user.id,
+        created_by_user_id=user.id,
         name="Initial Session",
         key_hash=key_hash,
         key_prefix=key[:12],
-        role="owner",
+        scopes=["*"],  # Full access
         is_active=True,
         expires_at=datetime.utcnow() + timedelta(hours=24),
     )
