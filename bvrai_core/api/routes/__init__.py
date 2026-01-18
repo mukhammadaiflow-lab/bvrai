@@ -12,6 +12,10 @@ from .campaigns import router as campaigns_router
 from .webhooks import router as webhooks_router
 from .analytics import router as analytics_router
 from .auth_routes import router as auth_router
+from .organization import router as organization_router
+from .voice_config import router as voice_config_router
+from .api_keys import router as api_keys_router
+from .billing import router as billing_router
 
 
 __all__ = [
@@ -23,4 +27,8 @@ __all__ = [
     "webhooks_router",
     "analytics_router",
     "auth_router",
+    "organization_router",
+    "voice_config_router",
+    "api_keys_router",
+    "billing_router",
 ]

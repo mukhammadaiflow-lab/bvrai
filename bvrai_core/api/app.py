@@ -49,6 +49,10 @@ from .routes import (
     webhooks_router,
     analytics_router,
     auth_router,
+    organization_router,
+    voice_config_router,
+    api_keys_router,
+    billing_router,
 )
 
 # Database imports
@@ -403,6 +407,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     app.include_router(campaigns_router, prefix=config.api_prefix)
     app.include_router(webhooks_router, prefix=config.api_prefix)
     app.include_router(analytics_router, prefix=config.api_prefix)
+    app.include_router(organization_router, prefix=config.api_prefix)
+    app.include_router(voice_config_router, prefix=config.api_prefix)
+    app.include_router(api_keys_router, prefix=config.api_prefix)
+    app.include_router(billing_router, prefix=config.api_prefix)
 
     # ==========================================================================
     # Custom OpenAPI Schema
