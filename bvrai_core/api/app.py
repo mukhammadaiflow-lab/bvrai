@@ -412,6 +412,28 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     app.include_router(api_keys_router, prefix=config.api_prefix)
     app.include_router(billing_router, prefix=config.api_prefix)
 
+    # Alias routes for frontend compatibility
+    # /knowledge -> /knowledge-bases alias
+    from fastapi import APIRouter as AliasRouter
+    knowledge_alias = AliasRouter(prefix="/knowledge", tags=["Knowledge"], include_in_schema=False)
+
+    @knowledge_alias.get("")
+    async def knowledge_list_alias(request: Request):
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url=f"{config.api_prefix}/knowledge-bases{request.url.query}", status_code=307)
+
+    @knowledge_alias.post("")
+    async def knowledge_create_alias(request: Request):
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url=f"{config.api_prefix}/knowledge-bases", status_code=307)
+
+    @knowledge_alias.get("/{kb_id}")
+    async def knowledge_get_alias(kb_id: str, request: Request):
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url=f"{config.api_prefix}/knowledge-bases/{kb_id}", status_code=307)
+
+    app.include_router(knowledge_alias, prefix=config.api_prefix)
+
     # ==========================================================================
     # Custom OpenAPI Schema
     # ==========================================================================

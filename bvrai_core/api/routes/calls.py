@@ -276,12 +276,21 @@ async def create_outbound_call(
 
     # Create call record
     call_repo = CallRepository(db)
+
+    # Determine from number - use request value, agent's number, or default
+    from_number = request.from_phone_number
+    if not from_number:
+        from_number = getattr(agent, 'phone_number', None)
+    if not from_number:
+        # Use a default/placeholder number for MVP
+        from_number = "+10000000000"
+
     call = await call_repo.create(
         organization_id=auth.organization_id,
         agent_id=request.agent_id,
         direction=CallDirection.OUTBOUND.value,
         status=CallStatus.QUEUED.value,
-        from_number=request.from_phone_number or getattr(agent, 'phone_number', '+10000000000'),
+        from_number=from_number,
         to_number=request.to_phone_number,
         metadata_json=request.metadata,
     )
@@ -292,6 +301,24 @@ async def create_outbound_call(
     # For now, we just create the record
 
     return success_response(call_to_response(call))
+
+
+# Alias: POST /calls for frontend compatibility
+@router.post(
+    "",
+    response_model=APIResponse[CallResponse],
+    status_code=201,
+    summary="Initiate Call",
+    description="Initiate an outbound call (alias for /outbound).",
+    include_in_schema=False,  # Hide from docs to avoid duplication
+)
+async def initiate_call_alias(
+    request: OutboundCallRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Alias for create_outbound_call."""
+    return await create_outbound_call(request, auth, db)
 
 
 @router.get(

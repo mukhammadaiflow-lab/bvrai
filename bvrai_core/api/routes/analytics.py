@@ -242,6 +242,33 @@ async def get_call_timeseries(
     return success_response(data.dict())
 
 
+# Alias: /time-series -> /calls/timeseries for frontend compatibility
+@router.get(
+    "/time-series",
+    response_model=APIResponse[TimeSeriesData],
+    summary="Get Time Series Data",
+    description="Get time series analytics (alias for calls/timeseries).",
+    include_in_schema=False,
+)
+async def get_time_series_alias(
+    metric: str = Query("total_calls", description="Metric to chart"),
+    granularity: str = Query(TimeGranularity.DAY),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    agent_id: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Alias for get_call_timeseries."""
+    return await get_call_timeseries(
+        metric=metric,
+        granularity=granularity,
+        start_date=start_date,
+        end_date=end_date,
+        agent_id=agent_id,
+        auth=auth,
+    )
+
+
 @router.get(
     "/agents/performance",
     response_model=APIResponse[List[AgentPerformance]],
@@ -658,6 +685,23 @@ async def get_dashboard_data(
     }
 
     return success_response(dashboard)
+
+
+# Alias: /overview -> /dashboard for frontend compatibility
+@router.get(
+    "/overview",
+    response_model=APIResponse[Dict[str, Any]],
+    summary="Get Overview Data",
+    description="Get overview analytics (alias for dashboard).",
+    include_in_schema=False,
+)
+async def get_overview_data(
+    period: str = Query("30d", description="Period: 7d, 30d, 90d"),
+    auth: AuthContext = Depends(get_auth_context),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Alias for get_dashboard_data."""
+    return await get_dashboard_data(period=period, auth=auth, db=db)
 
 
 @router.get(
