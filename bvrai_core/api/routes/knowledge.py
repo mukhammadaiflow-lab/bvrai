@@ -21,7 +21,7 @@ from ..base import (
     paginated_response,
 )
 from ..auth import AuthContext, Permission
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.repositories import KnowledgeBaseRepository
 
 
@@ -253,7 +253,7 @@ def doc_to_response(doc) -> dict:
 )
 async def create_knowledge_base(
     request: KnowledgeBaseCreateRequest,
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Create a knowledge base."""
@@ -291,7 +291,7 @@ async def list_knowledge_bases(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List knowledge bases."""
@@ -329,7 +329,7 @@ async def list_knowledge_bases(
 )
 async def get_knowledge_base(
     kb_id: str = Path(..., description="Knowledge base ID"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get knowledge base by ID."""
@@ -352,7 +352,7 @@ async def get_knowledge_base(
 async def update_knowledge_base(
     kb_id: str = Path(...),
     request: KnowledgeBaseUpdateRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update a knowledge base."""
@@ -389,7 +389,7 @@ async def update_knowledge_base(
 )
 async def delete_knowledge_base(
     kb_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a knowledge base."""
@@ -424,7 +424,7 @@ async def delete_knowledge_base(
 async def add_document(
     kb_id: str = Path(...),
     request: DocumentCreateRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Add a document to knowledge base."""
@@ -476,7 +476,7 @@ async def upload_document(
     kb_id: str = Path(...),
     file: UploadFile = File(...),
     name: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Upload a document file."""
@@ -540,7 +540,7 @@ async def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     doc_type: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List documents in a knowledge base."""
@@ -582,7 +582,7 @@ async def list_documents(
 async def get_document(
     kb_id: str = Path(...),
     doc_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get a document."""
@@ -610,7 +610,7 @@ async def get_document(
 async def delete_document(
     kb_id: str = Path(...),
     doc_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a document."""
@@ -651,7 +651,7 @@ async def delete_document(
 async def search_knowledge_base(
     kb_id: str = Path(...),
     request: SearchRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Search a knowledge base."""
@@ -682,7 +682,7 @@ async def search_knowledge_base(
 )
 async def reindex_knowledge_base(
     kb_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Reindex a knowledge base."""
@@ -719,7 +719,7 @@ async def reindex_knowledge_base(
 )
 async def get_knowledge_base_stats(
     kb_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get knowledge base statistics."""

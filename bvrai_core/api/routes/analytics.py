@@ -18,7 +18,7 @@ from ..base import (
     success_response,
 )
 from ..auth import AuthContext, Permission
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.models import Call, Agent
 
 
@@ -145,7 +145,7 @@ async def get_usage_summary(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     agent_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get usage summary."""
@@ -218,7 +218,7 @@ async def get_call_timeseries(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     agent_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get call metrics time series."""
     auth.require_permission(Permission.ANALYTICS_READ)
@@ -253,7 +253,7 @@ async def get_agent_performance(
     end_date: Optional[datetime] = Query(None),
     sort_by: str = Query("total_calls", description="Sort by metric"),
     limit: int = Query(10, ge=1, le=50),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get agent performance rankings."""
@@ -323,7 +323,7 @@ async def get_call_outcomes(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     agent_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get call outcome breakdown."""
@@ -376,7 +376,7 @@ async def get_duration_distribution(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     agent_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get call duration distribution."""
@@ -460,7 +460,7 @@ async def get_top_intents(
     end_date: Optional[datetime] = Query(None),
     agent_id: Optional[str] = Query(None),
     limit: int = Query(10, ge=1, le=50),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Get top detected intents."""
     auth.require_permission(Permission.ANALYTICS_READ)
@@ -478,7 +478,7 @@ async def get_cost_breakdown(
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     group_by: str = Query("day", description="Group by: day, week, month, agent"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get cost breakdown."""
@@ -530,7 +530,7 @@ async def get_cost_breakdown(
 )
 async def get_dashboard_data(
     period: str = Query("30d", description="Period: 7d, 30d, 90d"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get comprehensive dashboard data."""
@@ -671,7 +671,7 @@ async def export_analytics(
     report_type: str = Query("calls", description="Report type: calls, agents, usage"),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Export analytics data."""
     auth.require_permission(Permission.ANALYTICS_READ)

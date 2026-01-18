@@ -28,7 +28,7 @@ from ..auth import (
     Permission,
     require_permission,
 )
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.repositories import AgentRepository
 
 
@@ -357,7 +357,7 @@ def agent_to_summary(agent) -> dict:
 )
 async def create_agent(
     request: AgentCreateRequest,
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Create a new voice agent."""
@@ -400,7 +400,7 @@ async def list_agents(
     is_active: Optional[bool] = Query(None),
     industry: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all agents."""
@@ -436,7 +436,7 @@ async def list_agents(
 )
 async def get_agent(
     agent_id: str = Path(..., description="Agent ID"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get agent by ID."""
@@ -464,7 +464,7 @@ async def get_agent(
 async def update_agent(
     agent_id: str = Path(..., description="Agent ID"),
     request: AgentUpdateRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update an agent."""
@@ -524,7 +524,7 @@ async def update_agent(
 )
 async def delete_agent(
     agent_id: str = Path(..., description="Agent ID"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete an agent."""
@@ -557,7 +557,7 @@ async def delete_agent(
 async def duplicate_agent(
     agent_id: str = Path(..., description="Agent ID to duplicate"),
     name: str = Query(..., description="Name for the new agent"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Duplicate an agent."""
@@ -603,7 +603,7 @@ async def duplicate_agent(
 )
 async def publish_agent(
     agent_id: str = Path(..., description="Agent ID"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Publish agent changes."""
@@ -639,7 +639,7 @@ async def get_agent_versions(
     agent_id: str = Path(..., description="Agent ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get agent version history."""
@@ -686,7 +686,7 @@ async def get_agent_versions(
 async def rollback_agent(
     agent_id: str = Path(..., description="Agent ID"),
     version_id: str = Path(..., description="Version ID to rollback to"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Rollback agent to a previous version."""

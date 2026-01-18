@@ -23,7 +23,7 @@ from ..base import (
     paginated_response,
 )
 from ..auth import AuthContext, Permission
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.repositories import CampaignRepository, AgentRepository, PhoneNumberRepository
 
 
@@ -252,7 +252,7 @@ def contact_to_response(contact) -> dict:
 )
 async def create_campaign(
     request: CampaignCreateRequest,
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Create a new campaign."""
@@ -300,7 +300,7 @@ async def list_campaigns(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List campaigns."""
@@ -338,7 +338,7 @@ async def list_campaigns(
 )
 async def get_campaign(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get campaign details."""
@@ -361,7 +361,7 @@ async def get_campaign(
 async def update_campaign(
     campaign_id: str = Path(...),
     request: CampaignUpdateRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update a campaign."""
@@ -412,7 +412,7 @@ async def update_campaign(
 )
 async def delete_campaign(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a campaign."""
@@ -448,7 +448,7 @@ async def delete_campaign(
 async def add_contacts(
     campaign_id: str = Path(...),
     contacts: List[ContactInput] = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Add contacts to campaign."""
@@ -490,7 +490,7 @@ async def add_contacts(
 async def upload_contacts(
     campaign_id: str = Path(...),
     file: UploadFile = File(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Upload contacts from CSV."""
@@ -562,7 +562,7 @@ async def list_contacts(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List contacts in campaign."""
@@ -609,7 +609,7 @@ async def list_contacts(
 )
 async def start_campaign(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Start a campaign."""
@@ -647,7 +647,7 @@ async def start_campaign(
 )
 async def pause_campaign(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Pause a running campaign."""
@@ -680,7 +680,7 @@ async def pause_campaign(
 )
 async def resume_campaign(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Resume a paused campaign."""
@@ -713,7 +713,7 @@ async def resume_campaign(
 )
 async def cancel_campaign(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Cancel a campaign."""
@@ -746,7 +746,7 @@ async def cancel_campaign(
 )
 async def get_campaign_stats(
     campaign_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get campaign statistics."""

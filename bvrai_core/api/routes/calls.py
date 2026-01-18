@@ -25,7 +25,7 @@ from ..auth import (
     AuthContext,
     Permission,
 )
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.repositories import CallRepository, AgentRepository
 
 
@@ -218,15 +218,15 @@ def call_to_response(call) -> dict:
         "agent_id": call.agent_id,
         "direction": call.direction,
         "status": call.status,
-        "from_phone_number": call.from_phone_number,
-        "to_phone_number": call.to_phone_number,
-        "started_at": call.started_at,
+        "from_phone_number": call.from_number,
+        "to_phone_number": call.to_number,
+        "started_at": call.initiated_at,
         "ended_at": call.ended_at,
-        "duration_seconds": call.duration_seconds,
+        "duration_seconds": int(call.duration_seconds) if call.duration_seconds else None,
         "recording_url": call.recording_url,
-        "transcript_url": getattr(call, 'transcript_url', None),
-        "cost_cents": call.cost_cents,
-        "context": call.context_json or {},
+        "transcript_url": call.transcript_url,
+        "cost_cents": int(call.cost_amount * 100) if call.cost_amount else None,
+        "context": {},
         "metadata": call.metadata_json or {},
         "created_at": call.created_at,
         "updated_at": call.updated_at,
@@ -240,9 +240,9 @@ def call_to_summary(call) -> dict:
         "agent_id": call.agent_id,
         "direction": call.direction,
         "status": call.status,
-        "from_phone_number": call.from_phone_number,
-        "to_phone_number": call.to_phone_number,
-        "duration_seconds": call.duration_seconds,
+        "from_phone_number": call.from_number,
+        "to_phone_number": call.to_number,
+        "duration_seconds": int(call.duration_seconds) if call.duration_seconds else None,
         "created_at": call.created_at,
     }
 
@@ -261,7 +261,7 @@ def call_to_summary(call) -> dict:
 )
 async def create_outbound_call(
     request: OutboundCallRequest,
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Initiate an outbound call."""
@@ -281,9 +281,8 @@ async def create_outbound_call(
         agent_id=request.agent_id,
         direction=CallDirection.OUTBOUND.value,
         status=CallStatus.QUEUED.value,
-        from_phone_number=request.from_phone_number or agent.phone_number,
-        to_phone_number=request.to_phone_number,
-        context_json=request.context,
+        from_number=request.from_phone_number or getattr(agent, 'phone_number', '+10000000000'),
+        to_number=request.to_phone_number,
         metadata_json=request.metadata,
     )
 
@@ -309,7 +308,7 @@ async def list_calls(
     status: Optional[str] = Query(None),
     from_date: Optional[datetime] = Query(None),
     to_date: Optional[datetime] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List all calls."""
@@ -351,7 +350,7 @@ async def list_calls(
 )
 async def get_call(
     call_id: str = Path(..., description="Call ID"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get call by ID."""
@@ -377,7 +376,7 @@ async def get_call(
 )
 async def get_call_transcript(
     call_id: str = Path(..., description="Call ID"),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get call transcript."""
@@ -431,7 +430,7 @@ async def get_call_transcript(
 async def end_call(
     call_id: str = Path(..., description="Call ID"),
     request: CallEndRequest = Body(default=CallEndRequest()),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """End an active call."""
@@ -454,8 +453,8 @@ async def end_call(
     )
 
     # Calculate duration
-    if call.started_at and call.ended_at:
-        duration = int((call.ended_at - call.started_at).total_seconds())
+    if call.initiated_at and call.ended_at:
+        duration = int((call.ended_at - call.initiated_at).total_seconds())
         call = await repo.update(call_id, duration_seconds=duration)
 
     # Add end event
@@ -481,7 +480,7 @@ async def end_call(
 async def transfer_call(
     call_id: str = Path(..., description="Call ID"),
     request: CallTransferRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Transfer an active call."""
@@ -529,7 +528,7 @@ async def transfer_call(
 async def get_call_events(
     call_id: str = Path(..., description="Call ID"),
     event_type: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get call events."""

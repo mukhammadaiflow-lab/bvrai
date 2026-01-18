@@ -74,17 +74,20 @@ class InviteMemberRequest(BaseModel):
 # Helper Functions
 # =============================================================================
 
-def org_to_response(org: Organization) -> dict:
+def org_to_response(org: Organization, settings=None) -> dict:
     """Convert organization model to response dict."""
+    # Default settings - don't trigger lazy loading for relationship
+    default_settings = {
+        "default_language": "en",
+        "default_timezone": "America/New_York",
+    }
+
     return {
         "id": org.id,
         "name": org.name,
         "slug": org.slug,
         "plan": org.plan or "free",
-        "settings": org.settings if hasattr(org, 'settings') and org.settings else {
-            "default_language": "en",
-            "default_timezone": "America/New_York",
-        },
+        "settings": settings or default_settings,
         "is_active": org.is_active,
         "created_at": org.created_at.isoformat() if org.created_at else None,
         "updated_at": org.updated_at.isoformat() if org.updated_at else None,

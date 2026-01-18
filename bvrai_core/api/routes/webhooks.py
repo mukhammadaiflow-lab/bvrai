@@ -21,7 +21,7 @@ from ..base import (
     paginated_response,
 )
 from ..auth import AuthContext, Permission
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.repositories import WebhookRepository
 
 
@@ -221,7 +221,7 @@ def delivery_to_response(delivery) -> dict:
     summary="List Event Types",
     description="List all available webhook event types.",
 )
-async def list_event_types(auth: AuthContext = Depends()):
+async def list_event_types(auth: AuthContext = Depends(get_auth_context)):
     """List available webhook event types."""
     auth.require_permission(Permission.WEBHOOKS_READ)
     return success_response(WEBHOOK_EVENTS)
@@ -235,7 +235,7 @@ async def list_event_types(auth: AuthContext = Depends()):
 )
 async def create_webhook(
     request: WebhookCreateRequest,
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Create a new webhook endpoint."""
@@ -285,7 +285,7 @@ async def list_webhooks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     is_active: Optional[bool] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List webhooks."""
@@ -323,7 +323,7 @@ async def list_webhooks(
 )
 async def get_webhook(
     webhook_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get webhook details."""
@@ -346,7 +346,7 @@ async def get_webhook(
 async def update_webhook(
     webhook_id: str = Path(...),
     request: WebhookUpdateRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Update a webhook."""
@@ -400,7 +400,7 @@ async def update_webhook(
 )
 async def delete_webhook(
     webhook_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Delete a webhook."""
@@ -427,7 +427,7 @@ async def delete_webhook(
 )
 async def enable_webhook(
     webhook_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Enable a webhook."""
@@ -454,7 +454,7 @@ async def enable_webhook(
 )
 async def disable_webhook(
     webhook_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Disable a webhook."""
@@ -482,7 +482,7 @@ async def disable_webhook(
 )
 async def rotate_secret(
     webhook_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Rotate the webhook signing secret."""
@@ -517,7 +517,7 @@ async def rotate_secret(
 async def test_webhook(
     webhook_id: str = Path(...),
     event_type: str = Body(default="test.ping", embed=True),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Send a test event to webhook."""
@@ -575,7 +575,7 @@ async def list_deliveries(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     status: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List webhook deliveries."""
@@ -617,7 +617,7 @@ async def list_deliveries(
 async def retry_delivery(
     webhook_id: str = Path(...),
     delivery_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Retry a failed delivery."""

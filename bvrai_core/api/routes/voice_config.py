@@ -199,13 +199,14 @@ async def list_voice_configs(
     result = await db.execute(
         select(VoiceConfigurationModel).where(
             VoiceConfigurationModel.organization_id == auth.organization_id,
-            VoiceConfigurationModel.is_deleted == False,
         )
     )
     configs = result.scalars().all()
 
     # Return default config if none exist
     if not configs:
+        from datetime import datetime
+        now = datetime.utcnow().isoformat()
         return success_response([{
             "id": "default",
             "name": "Default Voice",
@@ -219,8 +220,8 @@ async def list_voice_configs(
             "speed": 1.0,
             "pitch": 1.0,
             "is_default": True,
-            "created_at": None,
-            "updated_at": None,
+            "created_at": now,
+            "updated_at": now,
         }])
 
     return success_response([config_to_response(c) for c in configs])
@@ -362,7 +363,7 @@ async def delete_voice_config(
     if not config:
         raise NotFoundError("Voice configuration not found")
 
-    config.is_deleted = True
+    await db.delete(config)
     await db.commit()
 
     logger.info(f"Voice config deleted: {config_id}")

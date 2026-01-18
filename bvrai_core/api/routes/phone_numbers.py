@@ -21,7 +21,7 @@ from ..base import (
     paginated_response,
 )
 from ..auth import AuthContext, Permission
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, get_auth_context
 from ...database.repositories import PhoneNumberRepository, AgentRepository
 
 
@@ -159,7 +159,7 @@ async def search_available_numbers(
     contains: Optional[str] = Query(None),
     voice: bool = Query(True),
     limit: int = Query(20, ge=1, le=100),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """Search for available phone numbers from provider (Twilio, etc)."""
     auth.require_permission(Permission.PHONE_NUMBERS_READ)
@@ -178,7 +178,7 @@ async def search_available_numbers(
 )
 async def add_phone_number(
     request: PhoneNumberPurchaseRequest,
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Add a phone number (can be purchased externally or via provider)."""
@@ -224,7 +224,7 @@ async def list_phone_numbers(
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None),
     agent_id: Optional[str] = Query(None),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """List phone numbers for the organization."""
@@ -265,7 +265,7 @@ async def list_phone_numbers(
 )
 async def get_phone_number(
     phone_number_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get phone number details."""
@@ -288,7 +288,7 @@ async def get_phone_number(
 async def configure_phone_number(
     phone_number_id: str = Path(...),
     request: PhoneNumberConfigRequest = Body(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Configure a phone number."""
@@ -340,7 +340,7 @@ async def configure_phone_number(
 )
 async def release_phone_number(
     phone_number_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Release a phone number."""
@@ -370,7 +370,7 @@ async def release_phone_number(
 async def assign_to_agent(
     phone_number_id: str = Path(...),
     agent_id: str = Body(..., embed=True),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Assign phone number to agent."""
@@ -404,7 +404,7 @@ async def assign_to_agent(
 )
 async def unassign_from_agent(
     phone_number_id: str = Path(...),
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Unassign phone number from agent."""
@@ -432,7 +432,7 @@ async def unassign_from_agent(
     description="Get phone numbers available for assignment to agents.",
 )
 async def get_available_for_assignment(
-    auth: AuthContext = Depends(),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Get phone numbers not assigned to any agent."""
