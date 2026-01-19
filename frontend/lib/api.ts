@@ -104,8 +104,8 @@ export const auth = {
     return { ...data, access_token: data.token };
   },
 
-  async register(params: { email: string; password: string; name?: string }): Promise<{ access_token: string; user: User }> {
-    const { data } = await api.post("/auth/register", params);
+  async register(email: string, password: string, name?: string, organizationName?: string): Promise<{ access_token: string; user: User }> {
+    const { data } = await api.post("/auth/register", { email, password, name, organization_name: organizationName });
     return data;
   },
 
@@ -205,12 +205,14 @@ export const calls = {
     return data;
   },
 
-  async initiateOutbound(params: {
-    agent_id: string;
-    to_number: string;
-    from_number?: string;
-    metadata?: Record<string, unknown>;
-  }): Promise<Call> {
+  async initiateOutbound(
+    agentIdOrParams: string | { agent_id: string; to_number: string; from_number?: string; metadata?: Record<string, unknown> },
+    toNumber?: string,
+    metadata?: Record<string, unknown>
+  ): Promise<Call> {
+    const params = typeof agentIdOrParams === 'string'
+      ? { agent_id: agentIdOrParams, to_number: toNumber!, metadata }
+      : agentIdOrParams;
     const { data } = await api.post("/calls/outbound", params);
     return data;
   },
@@ -269,11 +271,12 @@ export const voiceConfig = {
     await api.delete(`/voice-configs/${configId}`);
   },
 
-  async listVoices(params?: {
-    provider?: string;
-    language?: string;
-    gender?: string;
-  }): Promise<Voice[]> {
+  async listVoices(
+    providerOrParams?: string | { provider?: string; language?: string; gender?: string }
+  ): Promise<Voice[]> {
+    const params = typeof providerOrParams === 'string'
+      ? { provider: providerOrParams }
+      : providerOrParams;
     const { data } = await api.get("/voices", { params });
     return data;
   },
@@ -356,7 +359,7 @@ export const webhooks = {
     return data;
   },
 
-  async create(webhook: Partial<Webhook> & { url: string; events: string[] }): Promise<Webhook> {
+  async create(webhook: Partial<Webhook>): Promise<Webhook> {
     const { data } = await api.post("/webhooks", webhook);
     return data;
   },
@@ -417,9 +420,9 @@ export const billing = {
     await api.post("/billing/payment-method", { payment_method_id: paymentMethodId });
   },
 
-  async createCheckoutSession(planId: string): Promise<{ url: string; session_id: string }> {
+  async createCheckoutSession(planId: string): Promise<{ checkout_url: string; session_id: string }> {
     const { data } = await api.post("/billing/checkout", { plan_id: planId });
-    return data;
+    return { checkout_url: data.url || data.checkout_url, session_id: data.session_id };
   },
 
   async cancelSubscription(): Promise<void> {
@@ -476,11 +479,13 @@ export const apiKeys = {
     return data;
   },
 
-  async create(params: {
-    name: string;
-    scopes?: string[];
-    expires_at?: string;
-  }): Promise<{ key: string; api_key: ApiKey }> {
+  async create(
+    nameOrParams: string | { name: string; scopes?: string[]; expires_at?: string },
+    scopes?: string[]
+  ): Promise<{ key: string; api_key: ApiKey }> {
+    const params = typeof nameOrParams === 'string'
+      ? { name: nameOrParams, scopes }
+      : nameOrParams;
     const { data } = await api.post("/api-keys", params);
     return data;
   },
