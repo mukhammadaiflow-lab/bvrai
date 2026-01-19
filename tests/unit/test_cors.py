@@ -8,7 +8,7 @@ import os
 import pytest
 from unittest.mock import patch
 
-from platform.security.cors import (
+from bvrai_core.security.cors import (
     CORSConfig,
     get_cors_middleware_config,
     validate_cors_config,

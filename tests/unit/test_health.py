@@ -8,7 +8,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from platform.api.health import (
+from bvrai_core.api.health import (
     HealthStatus,
     ComponentType,
     ComponentHealth,

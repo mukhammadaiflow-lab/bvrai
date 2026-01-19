@@ -7,7 +7,7 @@ Tests for secure API key generation, hashing, and validation.
 import pytest
 from datetime import datetime, timedelta
 
-from platform.security.api_keys import (
+from bvrai_core.security.api_keys import (
     API_KEY_PREFIX,
     APIKeyMetadata,
     APIKeyData,

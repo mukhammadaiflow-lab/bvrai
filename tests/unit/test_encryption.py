@@ -9,7 +9,7 @@ import pytest
 import base64
 from datetime import datetime
 
-from platform.security.encryption import (
+from bvrai_core.security.encryption import (
     EncryptionAlgorithm,
     KeyType,
     HashAlgorithm,

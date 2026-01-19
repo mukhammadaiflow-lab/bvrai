@@ -8,7 +8,7 @@ import pytest
 from datetime import datetime, timedelta
 import time
 
-from platform.security.jwt import (
+from bvrai_core.security.jwt import (
     JWTKey,
     TokenPayload,
     TokenPair,
