@@ -26,7 +26,7 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Cryptography imports with fallback
+# Cryptography imports - REQUIRED for secure encryption
 try:
     from cryptography.fernet import Fernet
     from cryptography.hazmat.backends import default_backend
@@ -39,7 +39,10 @@ try:
     HAS_CRYPTOGRAPHY = True
 except ImportError:
     HAS_CRYPTOGRAPHY = False
-    logger.warning("cryptography package not installed, using basic encryption")
+    logger.error(
+        "SECURITY ERROR: cryptography package not installed. "
+        "Encryption operations will fail. Install with: pip install cryptography"
+    )
 
 
 class EncryptionAlgorithm(str, Enum):
@@ -351,19 +354,17 @@ class DataEncryptor:
 
     def _encrypt_fernet_fallback(self, plaintext: bytes) -> EncryptedData:
         """Fallback encryption when cryptography is not available."""
-        # Simple XOR-based encryption (NOT secure, just for demo)
-        key_stream = self._master_key * (len(plaintext) // 32 + 1)
-        ciphertext = bytes(p ^ k for p, k in zip(plaintext, key_stream))
-        return EncryptedData(
-            ciphertext=ciphertext,
-            algorithm=EncryptionAlgorithm.FERNET,
-            key_id=self._key_id,
+        raise RuntimeError(
+            "cryptography package is required for encryption. "
+            "Install it with: pip install cryptography"
         )
 
     def _decrypt_fernet_fallback(self, encrypted: EncryptedData) -> bytes:
         """Fallback decryption when cryptography is not available."""
-        key_stream = self._master_key * (len(encrypted.ciphertext) // 32 + 1)
-        return bytes(c ^ k for c, k in zip(encrypted.ciphertext, key_stream))
+        raise RuntimeError(
+            "cryptography package is required for decryption. "
+            "Install it with: pip install cryptography"
+        )
 
 
 class FieldEncryptor:

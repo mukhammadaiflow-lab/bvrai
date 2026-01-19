@@ -180,6 +180,11 @@ export const agents = {
     const { data } = await api.post(`/agents/${agentId}/rollback`, { version });
     return data;
   },
+
+  async deploy(agentId: string): Promise<Agent> {
+    const { data } = await api.post(`/agents/${agentId}/deploy`);
+    return data;
+  },
 };
 
 // ============================================================================
@@ -238,6 +243,30 @@ export const calls = {
 
   async getEvents(callId: string): Promise<CallEvent[]> {
     const { data } = await api.get(`/calls/${callId}/events`);
+    return data;
+  },
+
+  async end(callId: string): Promise<void> {
+    await api.post(`/calls/${callId}/hangup`);
+  },
+
+  async getTranscript(callId: string): Promise<{ transcript: string; messages: Message[] }> {
+    const { data } = await api.get(`/calls/${callId}/transcript`);
+    return data;
+  },
+
+  async getAnalytics(params?: {
+    startDate?: string;
+    endDate?: string;
+    agentId?: string;
+  }): Promise<AnalyticsSummary> {
+    const { data } = await api.get("/analytics/summary", {
+      params: {
+        from_date: params?.startDate,
+        to_date: params?.endDate,
+        agent_id: params?.agentId,
+      }
+    });
     return data;
   },
 };

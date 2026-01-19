@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import {
   Phone,
   PhoneIncoming,
@@ -15,6 +17,8 @@ import {
   Calendar,
   Clock,
   Bot,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,116 +32,116 @@ import {
   formatRelativeTime,
   getStatusColor,
 } from "@/lib/utils";
+import { calls } from "@/lib/api";
 
-// Mock calls data
-const mockCalls = [
-  {
-    id: "call_1",
-    agentName: "Sales Agent",
-    agentId: "agent_1",
-    direction: "inbound",
-    fromNumber: "+15551234567",
-    toNumber: "+15559876543",
-    status: "completed",
-    startedAt: "2024-01-14T10:30:00Z",
-    endedAt: "2024-01-14T10:34:05Z",
-    duration: 245,
-    recordingUrl: "https://example.com/recording1.mp3",
-    costCents: 12,
-    sentiment: "positive",
-    outcome: "qualified_lead",
-  },
-  {
-    id: "call_2",
-    agentName: "Support Agent",
-    agentId: "agent_2",
-    direction: "inbound",
-    fromNumber: "+15559876543",
-    toNumber: "+15551234567",
-    status: "in_progress",
-    startedAt: "2024-01-14T10:35:00Z",
-    endedAt: null,
-    duration: null,
-    recordingUrl: null,
-    costCents: null,
-    sentiment: null,
-    outcome: null,
-  },
-  {
-    id: "call_3",
-    agentName: "Sales Agent",
-    agentId: "agent_1",
-    direction: "outbound",
-    fromNumber: "+15551234567",
-    toNumber: "+15554567890",
-    status: "completed",
-    startedAt: "2024-01-14T10:15:00Z",
-    endedAt: "2024-01-14T10:18:00Z",
-    duration: 180,
-    recordingUrl: "https://example.com/recording2.mp3",
-    costCents: 9,
-    sentiment: "neutral",
-    outcome: "callback_scheduled",
-  },
-  {
-    id: "call_4",
-    agentName: "Booking Agent",
-    agentId: "agent_3",
-    direction: "inbound",
-    fromNumber: "+15553210987",
-    toNumber: "+15551234567",
-    status: "failed",
-    startedAt: "2024-01-14T10:10:00Z",
-    endedAt: "2024-01-14T10:10:05Z",
-    duration: 5,
-    recordingUrl: null,
-    costCents: 0,
-    sentiment: null,
-    outcome: "no_answer",
-  },
-  {
-    id: "call_5",
-    agentName: "Survey Agent",
-    agentId: "agent_4",
-    direction: "outbound",
-    fromNumber: "+15551234567",
-    toNumber: "+15557890123",
-    status: "completed",
-    startedAt: "2024-01-14T09:45:00Z",
-    endedAt: "2024-01-14T09:48:30Z",
-    duration: 210,
-    recordingUrl: "https://example.com/recording3.mp3",
-    costCents: 11,
-    sentiment: "positive",
-    outcome: "survey_completed",
-  },
-];
+// Skeleton for table rows
+function CallRowSkeleton() {
+  return (
+    <tr className="border-b">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 bg-muted animate-pulse rounded-full" />
+          <div>
+            <div className="h-4 w-28 bg-muted animate-pulse rounded mb-1" />
+            <div className="h-3 w-16 bg-muted animate-pulse rounded" />
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 w-16 bg-muted animate-pulse rounded" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-5 w-20 bg-muted animate-pulse rounded" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-5 w-16 bg-muted animate-pulse rounded" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-4 w-20 bg-muted animate-pulse rounded mb-1" />
+        <div className="h-3 w-16 bg-muted animate-pulse rounded" />
+      </td>
+      <td className="px-4 py-3">
+        <div className="h-8 w-24 bg-muted animate-pulse rounded" />
+      </td>
+    </tr>
+  );
+}
 
-const statusOptions = ["all", "in_progress", "completed", "failed"];
-const directionOptions = ["all", "inbound", "outbound"];
+// Skeleton for stats card
+function StatCardSkeleton() {
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-4 w-20 bg-muted animate-pulse rounded mb-2" />
+            <div className="h-8 w-12 bg-muted animate-pulse rounded" />
+          </div>
+          <div className="h-8 w-8 bg-muted animate-pulse rounded" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function CallsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [directionFilter, setDirectionFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
-  const filteredCalls = mockCalls.filter((call) => {
-    const matchesSearch =
-      call.fromNumber.includes(searchQuery) ||
-      call.toNumber.includes(searchQuery) ||
-      call.agentName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === "all" || call.status === statusFilter;
-    const matchesDirection = directionFilter === "all" || call.direction === directionFilter;
-    return matchesSearch && matchesStatus && matchesDirection;
+  // Fetch calls from API
+  const { data: callsData, isLoading, error } = useQuery({
+    queryKey: ["calls", "list", page, statusFilter, directionFilter],
+    queryFn: () => calls.list({
+      page,
+      page_size: pageSize,
+      status: statusFilter !== "all" ? statusFilter : undefined,
+      direction: directionFilter !== "all" ? directionFilter : undefined,
+    }),
+    staleTime: 15 * 1000, // 15 seconds
   });
 
-  // Stats
+  const allCalls = callsData?.items || [];
+  const totalCalls = callsData?.total || 0;
+  const totalPages = Math.ceil(totalCalls / pageSize);
+
+  // Client-side search filtering
+  const filteredCalls = allCalls.filter((call: any) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      (call.from_number && call.from_number.includes(searchQuery)) ||
+      (call.to_number && call.to_number.includes(searchQuery)) ||
+      (call.agent_name && call.agent_name.toLowerCase().includes(query))
+    );
+  });
+
+  // Stats - computed from visible data
   const stats = {
-    total: mockCalls.length,
-    active: mockCalls.filter((c) => c.status === "in_progress").length,
-    completed: mockCalls.filter((c) => c.status === "completed").length,
-    failed: mockCalls.filter((c) => c.status === "failed").length,
+    total: totalCalls,
+    active: allCalls.filter((c: any) => c.status === "in_progress").length,
+    completed: allCalls.filter((c: any) => c.status === "completed").length,
+    failed: allCalls.filter((c: any) => c.status === "failed").length,
   };
+
+  // Error state
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-lg font-medium">Failed to load calls</p>
+        <p className="text-sm text-muted-foreground">
+          {error instanceof Error ? error.message : "Unknown error"}
+        </p>
+        <Button onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -154,68 +158,79 @@ export default function CallsPage() {
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Button>
-            <Phone className="mr-2 h-4 w-4" />
-            New Call
+          <Button asChild>
+            <Link href="/calls/new">
+              <Phone className="mr-2 h-4 w-4" />
+              New Call
+            </Link>
           </Button>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Calls</p>
-                <p className="text-2xl font-bold">{stats.total}</p>
+      {isLoading ? (
+        <div className="grid gap-4 md:grid-cols-4">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Calls</p>
+                  <p className="text-2xl font-bold">{stats.total}</p>
+                </div>
+                <Phone className="h-8 w-8 text-muted-foreground" />
               </div>
-              <Phone className="h-8 w-8 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Active Now</p>
-                <p className="text-2xl font-bold text-green-600">{stats.active}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Active Now</p>
+                  <p className="text-2xl font-bold text-green-600">{stats.active}</p>
+                </div>
+                <div className="relative">
+                  <Phone className="h-8 w-8 text-green-600" />
+                  {stats.active > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="relative">
-                <Phone className="h-8 w-8 text-green-600" />
-                {stats.active > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                  </span>
-                )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Completed</p>
+                  <p className="text-2xl font-bold">{stats.completed}</p>
+                </div>
+                <Phone className="h-8 w-8 text-muted-foreground" />
               </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Completed</p>
-                <p className="text-2xl font-bold">{stats.completed}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Failed</p>
+                  <p className="text-2xl font-bold text-red-600">{stats.failed}</p>
+                </div>
+                <PhoneOff className="h-8 w-8 text-red-600" />
               </div>
-              <Phone className="h-8 w-8 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Failed</p>
-                <p className="text-2xl font-bold text-red-600">{stats.failed}</p>
-              </div>
-              <PhoneOff className="h-8 w-8 text-red-600" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
       <Card>
@@ -233,7 +248,10 @@ export default function CallsPage() {
             <div className="flex gap-2">
               <select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 <option value="all">All Status</option>
@@ -243,7 +261,10 @@ export default function CallsPage() {
               </select>
               <select
                 value={directionFilter}
-                onChange={(e) => setDirectionFilter(e.target.value)}
+                onChange={(e) => {
+                  setDirectionFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 <option value="all">All Direction</option>
@@ -289,93 +310,117 @@ export default function CallsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredCalls.map((call) => (
-                  <tr key={call.id} className="border-b hover:bg-muted/50">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "flex h-10 w-10 items-center justify-center rounded-full",
-                          call.direction === "inbound" ? "bg-blue-100" : "bg-green-100"
-                        )}>
-                          {call.direction === "inbound" ? (
-                            <PhoneIncoming className="h-5 w-5 text-blue-600" />
-                          ) : (
-                            <PhoneOutgoing className="h-5 w-5 text-green-600" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium">
-                            {formatPhoneNumber(
-                              call.direction === "inbound" ? call.fromNumber : call.toNumber
-                            )}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {call.direction === "inbound" ? "Inbound" : "Outbound"}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-4 w-4 text-muted-foreground" />
-                        <span>{call.agentName}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span>
-                          {call.status === "in_progress" ? (
-                            <span className="text-green-600">Live</span>
-                          ) : (
-                            formatDuration(call.duration)
-                          )}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge className={getStatusColor(call.status)}>
-                        {call.status.replace("_", " ")}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      {call.sentiment && (
-                        <Badge
-                          variant={
-                            call.sentiment === "positive" ? "success" :
-                            call.sentiment === "negative" ? "destructive" :
-                            "secondary"
-                          }
-                        >
-                          {call.sentiment}
-                        </Badge>
+                {isLoading ? (
+                  <>
+                    <CallRowSkeleton />
+                    <CallRowSkeleton />
+                    <CallRowSkeleton />
+                    <CallRowSkeleton />
+                    <CallRowSkeleton />
+                  </>
+                ) : filteredCalls.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center">
+                      <Phone className="h-8 w-8 mx-auto mb-2 text-muted-foreground opacity-50" />
+                      <p className="text-muted-foreground">No calls found</p>
+                      {searchQuery && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Try adjusting your search
+                        </p>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <div>
-                        <p className="text-sm">{formatDate(call.startedAt, "PP")}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(call.startedAt, "p")}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {call.recordingUrl && (
-                          <Button variant="ghost" size="icon-sm" title="Play Recording">
-                            <Play className="h-4 w-4" />
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="icon-sm" title="View Details">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon-sm">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredCalls.map((call: any) => (
+                    <tr key={call.id} className="border-b hover:bg-muted/50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "flex h-10 w-10 items-center justify-center rounded-full",
+                            call.direction === "inbound" ? "bg-blue-100" : "bg-green-100"
+                          )}>
+                            {call.direction === "inbound" ? (
+                              <PhoneIncoming className="h-5 w-5 text-blue-600" />
+                            ) : (
+                              <PhoneOutgoing className="h-5 w-5 text-green-600" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium">
+                              {formatPhoneNumber(
+                                call.direction === "inbound" ? call.from_number : call.to_number
+                              )}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {call.direction === "inbound" ? "Inbound" : "Outbound"}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-4 w-4 text-muted-foreground" />
+                          <span>{call.agent_name || "Unknown"}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                          <span>
+                            {call.status === "in_progress" ? (
+                              <span className="text-green-600">Live</span>
+                            ) : (
+                              formatDuration(call.duration_seconds || 0)
+                            )}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge className={getStatusColor(call.status)}>
+                          {call.status?.replace("_", " ") || "unknown"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        {call.sentiment && (
+                          <Badge
+                            variant={
+                              call.sentiment === "positive" ? "success" :
+                              call.sentiment === "negative" ? "destructive" :
+                              "secondary"
+                            }
+                          >
+                            {call.sentiment}
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="text-sm">{formatDate(call.created_at || call.initiated_at, "PP")}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(call.created_at || call.initiated_at, "p")}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {call.recording_url && (
+                            <Button variant="ghost" size="icon-sm" title="Play Recording">
+                              <Play className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="icon-sm" title="View Details" asChild>
+                            <Link href={`/calls/${call.id}`}>
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          <Button variant="ghost" size="icon-sm">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -383,13 +428,27 @@ export default function CallsPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between px-4 py-3 border-t">
             <p className="text-sm text-muted-foreground">
-              Showing {filteredCalls.length} of {mockCalls.length} calls
+              {isLoading ? (
+                "Loading..."
+              ) : (
+                `Showing ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, totalCalls)} of ${totalCalls} calls`
+              )}
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isLoading}
+                onClick={() => setPage(p => p - 1)}
+              >
                 Previous
               </Button>
-              <Button variant="outline" size="sm" disabled>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isLoading}
+                onClick={() => setPage(p => p + 1)}
+              >
                 Next
               </Button>
             </div>

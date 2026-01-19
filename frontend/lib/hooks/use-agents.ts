@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { agents, Agent, CreateAgentData, UpdateAgentData } from "@/lib/api";
+import { agents } from "@/lib/api";
+import type { Agent, CreateAgentRequest, UpdateAgentRequest } from "@/types";
 import { toast } from "sonner";
 
 /**
@@ -43,7 +44,7 @@ export function useCreateAgent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: CreateAgentData) => agents.create(data),
+    mutationFn: (data: CreateAgentRequest) => agents.create(data),
     onSuccess: (newAgent) => {
       // Invalidate and refetch agents list
       queryClient.invalidateQueries({ queryKey: agentKeys.lists() });
@@ -62,7 +63,7 @@ export function useUpdateAgent() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdateAgentData }) => agents.update(id, data),
+    mutationFn: ({ id, data }: { id: string; data: UpdateAgentRequest }) => agents.update(id, data),
     onSuccess: (updatedAgent, { id }) => {
       // Update the cache directly
       queryClient.setQueryData(agentKeys.detail(id), updatedAgent);

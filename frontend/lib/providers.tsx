@@ -2,7 +2,6 @@
 
 import { ReactNode, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { Toaster } from "sonner";
 
 interface ProvidersProps {
@@ -55,9 +54,6 @@ export function Providers({ children }: ProvidersProps) {
           duration: 4000,
         }}
       />
-      {process.env.NODE_ENV === "development" && (
-        <ReactQueryDevtools initialIsOpen={false} position="bottom" />
-      )}
     </QueryClientProvider>
   );
 }

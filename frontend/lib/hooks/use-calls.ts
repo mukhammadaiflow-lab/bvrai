@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { calls, Call } from "@/lib/api";
+import { calls } from "@/lib/api";
+import type { Call } from "@/types";
 import { toast } from "sonner";
 
 /**
