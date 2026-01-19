@@ -47,3 +47,9 @@ export * from "./date-picker";
 export * from "./scroll-area";
 export * from "./command";
 export * from "./search-input";
+
+// Animation Components
+export * from "./motion";
+
+// Accessibility Components
+export * from "./accessibility";

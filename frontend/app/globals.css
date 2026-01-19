@@ -564,3 +564,191 @@
     page-break-after: always;
   }
 }
+
+/* Accessibility Utilities */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.not-sr-only {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* Focus Management */
+.focus-trap:focus {
+  outline: none;
+}
+
+.skip-link {
+  @apply sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50;
+  @apply focus:bg-background focus:px-4 focus:py-2 focus:rounded-md focus:shadow-lg;
+  @apply focus:ring-2 focus:ring-ring focus:ring-offset-2;
+}
+
+/* High Contrast Mode Support */
+@media (forced-colors: active) {
+  .button-primary {
+    border: 2px solid currentColor;
+  }
+
+  .badge {
+    border: 1px solid currentColor;
+  }
+}
+
+/* Blink animation for cursor */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.animate-blink {
+  animation: blink 1s step-start infinite;
+}
+
+/* Loading shimmer for skeleton */
+@keyframes shimmer-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: hsl(var(--muted));
+}
+
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--background) / 0.4),
+    transparent
+  );
+  animation: shimmer-slide 1.5s infinite;
+}
+
+/* Smooth page transitions */
+.page-enter {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms ease-out, transform 300ms ease-out;
+}
+
+.page-exit {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.page-exit-active {
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 200ms ease-in, transform 200ms ease-in;
+}
+
+/* Hover lift effect */
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.12);
+}
+
+.hover-lift:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Interactive card styles */
+.interactive-card {
+  @apply transition-all duration-200 cursor-pointer;
+  @apply hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5;
+  @apply active:translate-y-0 active:shadow-sm;
+}
+
+/* Glow effect on focus */
+.glow-on-focus:focus-within {
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1);
+}
+
+/* Success animation */
+@keyframes success-check {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.success-check {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: success-check 0.5s ease-out forwards;
+}
+
+/* Error shake animation */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+  20%, 40%, 60%, 80% { transform: translateX(2px); }
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Expand/collapse animation */
+.expand-enter {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.expand-enter-active {
+  max-height: 1000px;
+  opacity: 1;
+  transition: max-height 300ms ease-out, opacity 200ms ease-out;
+}
+
+.expand-exit {
+  max-height: 1000px;
+  opacity: 1;
+}
+
+.expand-exit-active {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 200ms ease-in, opacity 150ms ease-in;
+}
