@@ -20,6 +20,8 @@ import {
   HelpCircle,
   MessageSquare,
   Sparkles,
+  Rocket,
+  Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -41,6 +43,7 @@ const navGroups: NavGroup[] = [
     title: "Overview",
     items: [
       { title: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="h-5 w-5" /> },
+      { title: "Getting Started", href: "/getting-started", icon: <Rocket className="h-5 w-5" />, badge: "New" },
     ],
   },
   {
@@ -49,7 +52,8 @@ const navGroups: NavGroup[] = [
       { title: "Agents", href: "/agents", icon: <Bot className="h-5 w-5" /> },
       { title: "Templates", href: "/templates", icon: <Sparkles className="h-5 w-5" />, badge: "New" },
       { title: "Voice Config", href: "/settings/voice", icon: <Mic className="h-5 w-5" /> },
-      { title: "Calls", href: "/calls", icon: <Phone className="h-5 w-5" /> },
+      { title: "Live Calls", href: "/calls/live", icon: <Radio className="h-5 w-5" /> },
+      { title: "Call History", href: "/calls", icon: <Phone className="h-5 w-5" /> },
       { title: "Conversations", href: "/conversations", icon: <MessageSquare className="h-5 w-5" />, badge: 3 },
     ],
   },
