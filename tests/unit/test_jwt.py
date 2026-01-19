@@ -1,7 +1,8 @@
 """
 Unit Tests for JWT Token Management
 
-Tests for JWT token generation, validation, and key rotation.
+Tests for JWT token generation, validation, key rotation,
+and token blacklist implementation.
 """
 
 import pytest
@@ -14,6 +15,12 @@ from bvrai_core.security.jwt import (
     TokenPair,
     JWTKeyManager,
     JWTService,
+    TokenBlacklist,
+    InMemoryTokenBlacklist,
+    RedisTokenBlacklist,
+    get_key_manager,
+    get_jwt_service,
+    get_token_blacklist,
 )
 
 
@@ -443,3 +450,291 @@ class TestJWTSecurity:
         # If we got here, verify the token is rejected
         result = service.verify_token(token, token_type="access")
         assert result is None
+
+
+# =============================================================================
+# Token Blacklist Tests
+# =============================================================================
+
+
+class TestInMemoryTokenBlacklist:
+    """Tests for in-memory token blacklist."""
+
+    @pytest.fixture
+    def blacklist(self):
+        """Create a fresh blacklist for each test."""
+        return InMemoryTokenBlacklist()
+
+    @pytest.mark.asyncio
+    async def test_add_token(self, blacklist):
+        """Test adding a token to the blacklist."""
+        exp = datetime.utcnow() + timedelta(hours=1)
+        result = await blacklist.add("test_jti", exp)
+
+        assert result is True
+        assert await blacklist.contains("test_jti") is True
+
+    @pytest.mark.asyncio
+    async def test_contains_nonexistent(self, blacklist):
+        """Test checking for non-existent token."""
+        assert await blacklist.contains("nonexistent") is False
+
+    @pytest.mark.asyncio
+    async def test_expired_token_removed(self, blacklist):
+        """Test that expired tokens are removed on check."""
+        exp = datetime.utcnow() - timedelta(hours=1)  # Already expired
+        await blacklist.add("expired_jti", exp)
+
+        # Should return False and clean up the entry
+        assert await blacklist.contains("expired_jti") is False
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired(self, blacklist):
+        """Test cleanup of expired entries."""
+        # Add expired token
+        await blacklist.add("expired", datetime.utcnow() - timedelta(hours=1))
+        # Add valid token
+        await blacklist.add("valid", datetime.utcnow() + timedelta(hours=1))
+
+        removed = await blacklist.cleanup_expired()
+
+        assert removed == 1
+        assert await blacklist.contains("valid") is True
+
+    def test_sync_add(self, blacklist):
+        """Test synchronous add method."""
+        exp = datetime.utcnow() + timedelta(hours=1)
+        result = blacklist.sync_add("sync_jti", exp)
+
+        assert result is True
+
+    def test_sync_contains(self, blacklist):
+        """Test synchronous contains method."""
+        exp = datetime.utcnow() + timedelta(hours=1)
+        blacklist.sync_add("sync_jti", exp)
+
+        assert blacklist.sync_contains("sync_jti") is True
+        assert blacklist.sync_contains("other") is False
+
+
+# =============================================================================
+# Token Revocation Tests
+# =============================================================================
+
+
+class TestTokenRevocation:
+    """Tests for token revocation (blacklisting)."""
+
+    @pytest.fixture
+    def service(self):
+        """Create a JWT service with in-memory blacklist."""
+        key_manager = JWTKeyManager(primary_secret="test_revocation_secret")
+        return JWTService(
+            key_manager=key_manager,
+            blacklist=InMemoryTokenBlacklist(),
+            access_token_expire_minutes=30,
+        )
+
+    def test_revoke_token(self, service):
+        """Test revoking a token."""
+        token = service.create_access_token(user_id="user123")
+
+        # Verify token works before revocation
+        payload = service.verify_token(token)
+        assert payload is not None
+
+        # Revoke the token
+        result = service.revoke_token(token)
+        assert result is True
+
+        # Token should no longer be valid
+        payload = service.verify_token(token)
+        assert payload is None
+
+    def test_revoke_invalid_token(self, service):
+        """Test revoking an invalid token."""
+        result = service.revoke_token("invalid_token")
+        assert result is False
+
+    def test_verify_without_blacklist_check(self, service):
+        """Test verifying without blacklist check."""
+        token = service.create_access_token(user_id="user123")
+        service.revoke_token(token)
+
+        # Should still work without blacklist check
+        payload = service.verify_token(token, check_blacklist=False)
+        assert payload is not None
+
+    @pytest.mark.asyncio
+    async def test_revoke_token_async(self, service):
+        """Test async token revocation."""
+        token = service.create_access_token(user_id="user123")
+
+        result = await service.revoke_token_async(token)
+        assert result is True
+
+        # Verify through async method
+        payload = await service.verify_token_async(token)
+        assert payload is None
+
+    @pytest.mark.asyncio
+    async def test_verify_token_async(self, service):
+        """Test async token verification."""
+        token = service.create_access_token(user_id="user123")
+
+        payload = await service.verify_token_async(token)
+
+        assert payload is not None
+        assert payload.sub == "user123"
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_user_tokens(self, service):
+        """Test revoking all tokens for a user."""
+        tokens = [
+            service.create_access_token(user_id="user123")
+            for _ in range(3)
+        ]
+
+        revoked = await service.revoke_all_user_tokens("user123", tokens)
+
+        assert revoked == 3
+        for token in tokens:
+            assert service.verify_token(token) is None
+
+
+# =============================================================================
+# Key Rotation with Blacklist Tests
+# =============================================================================
+
+
+class TestKeyRotationWithBlacklist:
+    """Tests for key rotation combined with token blacklisting."""
+
+    def test_old_key_tokens_still_blacklistable(self):
+        """Test that tokens from old keys can still be blacklisted."""
+        manager = JWTKeyManager(primary_secret="rotation_test_secret")
+        service = JWTService(
+            key_manager=manager,
+            blacklist=InMemoryTokenBlacklist(),
+        )
+
+        # Create token with original key
+        token = service.create_access_token(user_id="user123")
+
+        # Rotate keys
+        manager.rotate_primary()
+
+        # Token should still be verifiable
+        payload = service.verify_token(token)
+        assert payload is not None
+
+        # And can be revoked
+        result = service.revoke_token(token)
+        assert result is True
+
+        # After revocation, token is invalid
+        assert service.verify_token(token) is None
+
+    def test_revoked_token_stays_invalid_after_rotation(self):
+        """Test that a revoked token stays invalid even after key rotation."""
+        manager = JWTKeyManager(primary_secret="rotation_test_secret")
+        blacklist = InMemoryTokenBlacklist()
+        service = JWTService(
+            key_manager=manager,
+            blacklist=blacklist,
+        )
+
+        # Create and revoke token
+        token = service.create_access_token(user_id="user123")
+        service.revoke_token(token)
+
+        # Rotate keys
+        manager.rotate_primary()
+
+        # Token should still be invalid (blacklisted)
+        assert service.verify_token(token) is None
+
+
+# =============================================================================
+# Blacklist Edge Cases
+# =============================================================================
+
+
+class TestBlacklistEdgeCases:
+    """Tests for edge cases in token blacklisting."""
+
+    def test_revoke_token_without_jti(self):
+        """Test revoking a token that somehow has no JTI."""
+        # This shouldn't happen normally, but test the edge case
+        service = JWTService(
+            blacklist=InMemoryTokenBlacklist(),
+        )
+
+        # Create a valid token first
+        token = service.create_access_token(user_id="user123")
+
+        # The token should have a JTI, so revocation should work
+        result = service.revoke_token(token)
+        assert result is True
+
+    def test_double_revocation(self):
+        """Test revoking the same token twice."""
+        service = JWTService(
+            key_manager=JWTKeyManager(primary_secret="double_revoke_test"),
+            blacklist=InMemoryTokenBlacklist(),
+        )
+
+        token = service.create_access_token(user_id="user123")
+
+        # First revocation
+        result1 = service.revoke_token(token)
+        assert result1 is True
+
+        # Second revocation - should still succeed (idempotent)
+        result2 = service.revoke_token(token)
+        assert result2 is True
+
+    def test_revoke_expired_token(self):
+        """Test revoking an already expired token."""
+        service = JWTService(
+            key_manager=JWTKeyManager(primary_secret="expired_revoke_test"),
+            blacklist=InMemoryTokenBlacklist(),
+        )
+
+        # Create an expired token
+        token = service.create_access_token(
+            user_id="user123",
+            expires_delta=timedelta(seconds=-1),
+        )
+
+        # Should still be able to revoke (we don't verify expiration for revocation)
+        result = service.revoke_token(token)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_concurrent_revocation(self):
+        """Test concurrent token revocations."""
+        import asyncio
+
+        service = JWTService(
+            key_manager=JWTKeyManager(primary_secret="concurrent_test"),
+            blacklist=InMemoryTokenBlacklist(),
+        )
+
+        # Create multiple tokens
+        tokens = [
+            service.create_access_token(user_id=f"user{i}")
+            for i in range(10)
+        ]
+
+        # Revoke all concurrently
+        results = await asyncio.gather(*[
+            service.revoke_token_async(token)
+            for token in tokens
+        ])
+
+        assert all(results)
+
+        # All should be invalid
+        for token in tokens:
+            assert service.verify_token(token) is None

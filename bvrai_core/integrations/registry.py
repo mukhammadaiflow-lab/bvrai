@@ -192,6 +192,402 @@ class InMemoryCredentialStore(CredentialStore):
         self._credentials.pop(key, None)
 
 
+class EncryptedCredentialStore(CredentialStore):
+    """
+    Encrypted credential store that wraps another store.
+
+    Encrypts credentials before storage and decrypts on retrieval.
+    Uses the EncryptionService for secure encryption.
+    """
+
+    def __init__(
+        self,
+        backend: CredentialStore,
+        master_key: Optional[bytes] = None,
+    ):
+        """
+        Initialize encrypted credential store.
+
+        Args:
+            backend: Backend store to wrap
+            master_key: Optional master encryption key (32 bytes).
+                        If not provided, reads from CREDENTIAL_ENCRYPTION_KEY env var.
+        """
+        import os
+        import json
+        from ..security.encryption import EncryptionService, HAS_CRYPTOGRAPHY
+
+        self._backend = backend
+
+        # Get or generate master key
+        if master_key:
+            self._master_key = master_key
+        else:
+            key_env = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+            if key_env:
+                self._master_key = key_env.encode()[:32].ljust(32, b"\x00")
+            else:
+                # Generate a key for development (NOT recommended for production)
+                import secrets
+                self._master_key = secrets.token_bytes(32)
+                logger.warning(
+                    "No CREDENTIAL_ENCRYPTION_KEY set. Generated random key. "
+                    "Set CREDENTIAL_ENCRYPTION_KEY for production."
+                )
+
+        if not HAS_CRYPTOGRAPHY:
+            raise RuntimeError(
+                "cryptography package is required for EncryptedCredentialStore. "
+                "Install with: pip install cryptography"
+            )
+
+        self._encryption_service = EncryptionService(master_key=self._master_key)
+
+    def _encrypt_credentials(self, credentials: Dict[str, Any]) -> str:
+        """Encrypt credentials dictionary to string."""
+        import json
+        json_str = json.dumps(credentials)
+        return self._encryption_service.encrypt_string(json_str)
+
+    def _decrypt_credentials(self, encrypted: str) -> Dict[str, Any]:
+        """Decrypt credentials string to dictionary."""
+        import json
+        json_str = self._encryption_service.decrypt_string(encrypted)
+        return json.loads(json_str)
+
+    async def store_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+        credentials: Dict[str, Any],
+    ) -> None:
+        """Encrypt and store credentials."""
+        encrypted = self._encrypt_credentials(credentials)
+        # Store as a dict with encrypted data
+        await self._backend.store_credentials(
+            integration_id,
+            organization_id,
+            {"__encrypted__": encrypted},
+        )
+
+    async def get_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve and decrypt credentials."""
+        stored = await self._backend.get_credentials(integration_id, organization_id)
+        if not stored:
+            return None
+
+        encrypted = stored.get("__encrypted__")
+        if not encrypted:
+            # Not encrypted (legacy data), return as-is
+            return stored
+
+        return self._decrypt_credentials(encrypted)
+
+    async def update_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+        updates: Dict[str, Any],
+    ) -> None:
+        """Update credentials (decrypt, update, re-encrypt)."""
+        current = await self.get_credentials(integration_id, organization_id)
+        if current:
+            current.update(updates)
+            await self.store_credentials(integration_id, organization_id, current)
+
+    async def delete_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+    ) -> None:
+        """Delete credentials from backend."""
+        await self._backend.delete_credentials(integration_id, organization_id)
+
+
+class DatabaseCredentialStore(CredentialStore):
+    """
+    Database-backed credential store for production use.
+
+    Stores encrypted credentials in the database.
+    """
+
+    def __init__(
+        self,
+        session_factory,
+        table_name: str = "integration_credentials",
+        master_key: Optional[bytes] = None,
+    ):
+        """
+        Initialize database credential store.
+
+        Args:
+            session_factory: Async session factory (e.g., from SQLAlchemy)
+            table_name: Name of the credentials table
+            master_key: Optional master encryption key
+        """
+        import os
+
+        self._session_factory = session_factory
+        self._table_name = table_name
+
+        # Get master key for encryption
+        if master_key:
+            self._master_key = master_key
+        else:
+            key_env = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+            if key_env:
+                self._master_key = key_env.encode()[:32].ljust(32, b"\x00")
+            else:
+                raise ValueError(
+                    "CREDENTIAL_ENCRYPTION_KEY environment variable is required "
+                    "for DatabaseCredentialStore in production."
+                )
+
+        from ..security.encryption import EncryptionService
+        self._encryption_service = EncryptionService(master_key=self._master_key)
+
+    def _encrypt(self, data: Dict[str, Any]) -> str:
+        """Encrypt credentials."""
+        import json
+        return self._encryption_service.encrypt_string(json.dumps(data))
+
+    def _decrypt(self, encrypted: str) -> Dict[str, Any]:
+        """Decrypt credentials."""
+        import json
+        return json.loads(self._encryption_service.decrypt_string(encrypted))
+
+    async def store_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+        credentials: Dict[str, Any],
+    ) -> None:
+        """Store encrypted credentials in database."""
+        encrypted = self._encrypt(credentials)
+
+        async with self._session_factory() as session:
+            # Check if exists
+            result = await session.execute(
+                f"""
+                SELECT id FROM {self._table_name}
+                WHERE integration_id = :integration_id
+                AND organization_id = :organization_id
+                """,
+                {"integration_id": integration_id, "organization_id": organization_id},
+            )
+            existing = result.first()
+
+            if existing:
+                # Update
+                await session.execute(
+                    f"""
+                    UPDATE {self._table_name}
+                    SET encrypted_credentials = :encrypted,
+                        updated_at = NOW()
+                    WHERE integration_id = :integration_id
+                    AND organization_id = :organization_id
+                    """,
+                    {
+                        "encrypted": encrypted,
+                        "integration_id": integration_id,
+                        "organization_id": organization_id,
+                    },
+                )
+            else:
+                # Insert
+                await session.execute(
+                    f"""
+                    INSERT INTO {self._table_name}
+                    (integration_id, organization_id, encrypted_credentials, created_at, updated_at)
+                    VALUES (:integration_id, :organization_id, :encrypted, NOW(), NOW())
+                    """,
+                    {
+                        "integration_id": integration_id,
+                        "organization_id": organization_id,
+                        "encrypted": encrypted,
+                    },
+                )
+
+            await session.commit()
+
+    async def get_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve and decrypt credentials from database."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                f"""
+                SELECT encrypted_credentials FROM {self._table_name}
+                WHERE integration_id = :integration_id
+                AND organization_id = :organization_id
+                """,
+                {"integration_id": integration_id, "organization_id": organization_id},
+            )
+            row = result.first()
+
+            if not row:
+                return None
+
+            return self._decrypt(row[0])
+
+    async def update_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+        updates: Dict[str, Any],
+    ) -> None:
+        """Update credentials in database."""
+        current = await self.get_credentials(integration_id, organization_id)
+        if current:
+            current.update(updates)
+            await self.store_credentials(integration_id, organization_id, current)
+
+    async def delete_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+    ) -> None:
+        """Delete credentials from database."""
+        async with self._session_factory() as session:
+            await session.execute(
+                f"""
+                DELETE FROM {self._table_name}
+                WHERE integration_id = :integration_id
+                AND organization_id = :organization_id
+                """,
+                {"integration_id": integration_id, "organization_id": organization_id},
+            )
+            await session.commit()
+
+
+class RedisCredentialStore(CredentialStore):
+    """
+    Redis-backed credential store.
+
+    Uses Redis for fast credential access with encryption.
+    Suitable for distributed deployments.
+    """
+
+    def __init__(
+        self,
+        redis_url: Optional[str] = None,
+        prefix: str = "credentials:",
+        master_key: Optional[bytes] = None,
+        ttl_seconds: Optional[int] = None,  # None = no expiration
+    ):
+        """
+        Initialize Redis credential store.
+
+        Args:
+            redis_url: Redis connection URL
+            prefix: Key prefix for credentials
+            master_key: Encryption key
+            ttl_seconds: Optional TTL for credentials (None = no expiration)
+        """
+        import os
+
+        self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
+        self._prefix = prefix
+        self._ttl = ttl_seconds
+        self._redis = None
+
+        # Get master key for encryption
+        if master_key:
+            self._master_key = master_key
+        else:
+            key_env = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+            if key_env:
+                self._master_key = key_env.encode()[:32].ljust(32, b"\x00")
+            else:
+                raise ValueError(
+                    "CREDENTIAL_ENCRYPTION_KEY environment variable is required "
+                    "for RedisCredentialStore."
+                )
+
+        from ..security.encryption import EncryptionService
+        self._encryption_service = EncryptionService(master_key=self._master_key)
+
+    async def _get_redis(self):
+        """Lazy initialization of Redis client."""
+        if self._redis is None:
+            try:
+                import redis.asyncio as redis
+                self._redis = redis.from_url(self._redis_url)
+            except ImportError:
+                raise RuntimeError("redis package is required for RedisCredentialStore")
+        return self._redis
+
+    def _get_key(self, integration_id: str, organization_id: str) -> str:
+        return f"{self._prefix}{organization_id}:{integration_id}"
+
+    def _encrypt(self, data: Dict[str, Any]) -> str:
+        import json
+        return self._encryption_service.encrypt_string(json.dumps(data))
+
+    def _decrypt(self, encrypted: str) -> Dict[str, Any]:
+        import json
+        return json.loads(self._encryption_service.decrypt_string(encrypted))
+
+    async def store_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+        credentials: Dict[str, Any],
+    ) -> None:
+        """Store encrypted credentials in Redis."""
+        redis = await self._get_redis()
+        key = self._get_key(integration_id, organization_id)
+        encrypted = self._encrypt(credentials)
+
+        if self._ttl:
+            await redis.setex(key, self._ttl, encrypted)
+        else:
+            await redis.set(key, encrypted)
+
+    async def get_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve and decrypt credentials from Redis."""
+        redis = await self._get_redis()
+        key = self._get_key(integration_id, organization_id)
+        encrypted = await redis.get(key)
+
+        if not encrypted:
+            return None
+
+        return self._decrypt(encrypted.decode() if isinstance(encrypted, bytes) else encrypted)
+
+    async def update_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+        updates: Dict[str, Any],
+    ) -> None:
+        """Update credentials in Redis."""
+        current = await self.get_credentials(integration_id, organization_id)
+        if current:
+            current.update(updates)
+            await self.store_credentials(integration_id, organization_id, current)
+
+    async def delete_credentials(
+        self,
+        integration_id: str,
+        organization_id: str,
+    ) -> None:
+        """Delete credentials from Redis."""
+        redis = await self._get_redis()
+        key = self._get_key(integration_id, organization_id)
+        await redis.delete(key)
+
+
 class IntegrationRegistry:
     """
     Central registry for integration providers.

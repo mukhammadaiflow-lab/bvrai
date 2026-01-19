@@ -9,8 +9,9 @@ import json
 import os
 import secrets
 import time
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import jwt
 from pydantic import BaseModel, Field
@@ -226,6 +227,120 @@ class JWTKeyManager:
 
 
 # =============================================================================
+# Token Blacklist
+# =============================================================================
+
+
+class TokenBlacklist(ABC):
+    """Abstract base class for token blacklist storage."""
+
+    @abstractmethod
+    async def add(self, jti: str, exp: datetime) -> bool:
+        """Add a token JTI to the blacklist."""
+        pass
+
+    @abstractmethod
+    async def contains(self, jti: str) -> bool:
+        """Check if a token JTI is blacklisted."""
+        pass
+
+    @abstractmethod
+    async def cleanup_expired(self) -> int:
+        """Remove expired entries from the blacklist."""
+        pass
+
+
+class InMemoryTokenBlacklist(TokenBlacklist):
+    """
+    In-memory token blacklist for development/testing.
+
+    For production, use RedisTokenBlacklist instead.
+    """
+
+    def __init__(self):
+        self._blacklist: Dict[str, datetime] = {}
+
+    async def add(self, jti: str, exp: datetime) -> bool:
+        """Add a token JTI to the blacklist with its expiration."""
+        self._blacklist[jti] = exp
+        return True
+
+    async def contains(self, jti: str) -> bool:
+        """Check if a token JTI is blacklisted."""
+        if jti not in self._blacklist:
+            return False
+        # Check if the blacklist entry has expired
+        if self._blacklist[jti] < datetime.utcnow():
+            del self._blacklist[jti]
+            return False
+        return True
+
+    async def cleanup_expired(self) -> int:
+        """Remove expired entries from the blacklist."""
+        now = datetime.utcnow()
+        expired = [jti for jti, exp in self._blacklist.items() if exp < now]
+        for jti in expired:
+            del self._blacklist[jti]
+        return len(expired)
+
+    def sync_add(self, jti: str, exp: datetime) -> bool:
+        """Synchronous version of add for compatibility."""
+        self._blacklist[jti] = exp
+        return True
+
+    def sync_contains(self, jti: str) -> bool:
+        """Synchronous version of contains for compatibility."""
+        if jti not in self._blacklist:
+            return False
+        if self._blacklist[jti] < datetime.utcnow():
+            del self._blacklist[jti]
+            return False
+        return True
+
+
+class RedisTokenBlacklist(TokenBlacklist):
+    """
+    Redis-backed token blacklist for production.
+
+    Uses Redis TTL for automatic expiration of blacklisted tokens.
+    """
+
+    def __init__(self, redis_url: Optional[str] = None, prefix: str = "token_blacklist:"):
+        self.prefix = prefix
+        self._redis = None
+        self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
+
+    async def _get_redis(self):
+        """Lazy initialization of Redis client."""
+        if self._redis is None:
+            try:
+                import redis.asyncio as redis
+                self._redis = redis.from_url(self._redis_url)
+            except ImportError:
+                raise RuntimeError("redis package is required for RedisTokenBlacklist")
+        return self._redis
+
+    async def add(self, jti: str, exp: datetime) -> bool:
+        """Add a token JTI to the blacklist with TTL based on expiration."""
+        redis = await self._get_redis()
+        ttl = int((exp - datetime.utcnow()).total_seconds())
+        if ttl > 0:
+            await redis.setex(f"{self.prefix}{jti}", ttl, "1")
+            return True
+        return False
+
+    async def contains(self, jti: str) -> bool:
+        """Check if a token JTI is blacklisted."""
+        redis = await self._get_redis()
+        result = await redis.exists(f"{self.prefix}{jti}")
+        return bool(result)
+
+    async def cleanup_expired(self) -> int:
+        """Redis handles expiration automatically via TTL."""
+        return 0
+
+
+# =============================================================================
 # Token Service
 # =============================================================================
 
@@ -243,6 +358,7 @@ class JWTService:
     def __init__(
         self,
         key_manager: Optional[JWTKeyManager] = None,
+        blacklist: Optional[TokenBlacklist] = None,
         access_token_expire_minutes: int = DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
         refresh_token_expire_days: int = DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
     ):
@@ -251,10 +367,12 @@ class JWTService:
 
         Args:
             key_manager: JWT key manager (created if not provided)
+            blacklist: Token blacklist for revocation (in-memory by default)
             access_token_expire_minutes: Access token expiration
             refresh_token_expire_days: Refresh token expiration
         """
         self.key_manager = key_manager or JWTKeyManager()
+        self.blacklist = blacklist or InMemoryTokenBlacklist()
         self.access_token_expire_minutes = access_token_expire_minutes
         self.refresh_token_expire_days = refresh_token_expire_days
 
@@ -398,6 +516,7 @@ class JWTService:
         token: str,
         token_type: str = "access",
         verify_exp: bool = True,
+        check_blacklist: bool = True,
     ) -> Optional[TokenPayload]:
         """
         Verify and decode a token.
@@ -406,6 +525,7 @@ class JWTService:
             token: The JWT token to verify
             token_type: Expected token type (access or refresh)
             verify_exp: Verify expiration
+            check_blacklist: Check if token is blacklisted (revoked)
 
         Returns:
             TokenPayload if valid, None otherwise
@@ -437,6 +557,72 @@ class JWTService:
             # Verify token type
             if payload.type != token_type:
                 return None
+
+            # Check blacklist (synchronous check for in-memory)
+            if check_blacklist and payload.jti:
+                if isinstance(self.blacklist, InMemoryTokenBlacklist):
+                    if self.blacklist.sync_contains(payload.jti):
+                        return None
+
+            return payload
+
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+        except Exception:
+            return None
+
+    async def verify_token_async(
+        self,
+        token: str,
+        token_type: str = "access",
+        verify_exp: bool = True,
+        check_blacklist: bool = True,
+    ) -> Optional[TokenPayload]:
+        """
+        Async version of verify_token that properly checks Redis blacklist.
+
+        Args:
+            token: The JWT token to verify
+            token_type: Expected token type (access or refresh)
+            verify_exp: Verify expiration
+            check_blacklist: Check if token is blacklisted
+
+        Returns:
+            TokenPayload if valid, None otherwise
+        """
+        try:
+            # Get the key ID from header
+            header = jwt.get_unverified_header(token)
+            kid = header.get("kid")
+
+            # Find the key
+            if kid:
+                key = self.key_manager.get_key(kid)
+                if not key or not key.is_active:
+                    return None
+            else:
+                key = self.key_manager.primary_key
+
+            # Decode and verify
+            payload_dict = jwt.decode(
+                token,
+                key.secret,
+                algorithms=[key.algorithm],
+                options={"verify_exp": verify_exp},
+            )
+
+            payload = TokenPayload(**payload_dict)
+
+            # Verify token type
+            if payload.type != token_type:
+                return None
+
+            # Check blacklist asynchronously
+            if check_blacklist and payload.jti:
+                if await self.blacklist.contains(payload.jti):
+                    return None
 
             return payload
 
@@ -471,23 +657,79 @@ class JWTService:
             organization_id=payload.org,
         )
 
-    def revoke_token(self, jti: str) -> bool:
+    def revoke_token(self, token: str) -> bool:
         """
-        Revoke a token by its JTI.
-
-        Note: This requires a token blacklist implementation.
-        The blacklist should be stored in Redis or database.
+        Revoke a token by adding it to the blacklist.
 
         Args:
-            jti: The token's JTI claim
+            token: The JWT token to revoke
 
         Returns:
-            True if revoked successfully
+            True if revoked successfully, False otherwise
         """
-        # TODO: Implement token blacklist
-        # This should add the JTI to a blacklist in Redis/DB
-        # The blacklist should be checked in verify_token()
-        pass
+        try:
+            # Decode token without verifying expiration (we want to blacklist even expired tokens)
+            payload = self.verify_token(token, verify_exp=False, check_blacklist=False)
+            if not payload or not payload.jti:
+                return False
+
+            # Add to blacklist synchronously for in-memory
+            if isinstance(self.blacklist, InMemoryTokenBlacklist):
+                return self.blacklist.sync_add(payload.jti, payload.exp)
+
+            # For other implementations, use async in sync context
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Already in async context - this shouldn't happen in sync call
+                    return False
+                return loop.run_until_complete(
+                    self.blacklist.add(payload.jti, payload.exp)
+                )
+            except RuntimeError:
+                # No event loop, create one
+                return asyncio.run(self.blacklist.add(payload.jti, payload.exp))
+
+        except Exception:
+            return False
+
+    async def revoke_token_async(self, token: str) -> bool:
+        """
+        Async version of revoke_token.
+
+        Args:
+            token: The JWT token to revoke
+
+        Returns:
+            True if revoked successfully, False otherwise
+        """
+        try:
+            # Decode token without verifying expiration
+            payload = self.verify_token(token, verify_exp=False, check_blacklist=False)
+            if not payload or not payload.jti:
+                return False
+
+            return await self.blacklist.add(payload.jti, payload.exp)
+        except Exception:
+            return False
+
+    async def revoke_all_user_tokens(self, user_id: str, tokens: List[str]) -> int:
+        """
+        Revoke all tokens for a user (e.g., on password change or logout-all).
+
+        Args:
+            user_id: The user ID
+            tokens: List of tokens to revoke
+
+        Returns:
+            Number of tokens successfully revoked
+        """
+        revoked = 0
+        for token in tokens:
+            if await self.revoke_token_async(token):
+                revoked += 1
+        return revoked
 
 
 # =============================================================================
@@ -496,6 +738,7 @@ class JWTService:
 
 
 _key_manager: Optional[JWTKeyManager] = None
+_token_blacklist: Optional[TokenBlacklist] = None
 _jwt_service: Optional[JWTService] = None
 
 
@@ -507,11 +750,30 @@ def get_key_manager() -> JWTKeyManager:
     return _key_manager
 
 
+def get_token_blacklist() -> TokenBlacklist:
+    """
+    Get the token blacklist singleton.
+
+    Uses Redis if REDIS_URL is set, otherwise uses in-memory.
+    """
+    global _token_blacklist
+    if _token_blacklist is None:
+        redis_url = os.getenv("REDIS_URL")
+        if redis_url:
+            _token_blacklist = RedisTokenBlacklist(redis_url=redis_url)
+        else:
+            _token_blacklist = InMemoryTokenBlacklist()
+    return _token_blacklist
+
+
 def get_jwt_service() -> JWTService:
     """Get the JWT service singleton."""
     global _jwt_service
     if _jwt_service is None:
-        _jwt_service = JWTService(key_manager=get_key_manager())
+        _jwt_service = JWTService(
+            key_manager=get_key_manager(),
+            blacklist=get_token_blacklist(),
+        )
     return _jwt_service
 
 
@@ -525,7 +787,11 @@ __all__ = [
     "TokenPayload",
     "TokenPair",
     "JWTKeyManager",
+    "TokenBlacklist",
+    "InMemoryTokenBlacklist",
+    "RedisTokenBlacklist",
     "JWTService",
     "get_key_manager",
     "get_jwt_service",
+    "get_token_blacklist",
 ]
