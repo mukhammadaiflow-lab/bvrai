@@ -1,0 +1,261 @@
+---
+# Call Worker - Handles call processing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: call-worker
+  namespace: builder-engine
+  labels:
+    app: call-worker
+    tier: worker
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: call-worker
+  template:
+    metadata:
+      labels:
+        app: call-worker
+        tier: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: call-worker
+          image: builderengine/workers:latest
+          command: ["python", "-m", "app.workers.call_worker"]
+          envFrom:
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: database-secrets
+            - secretRef:
+                name: redis-secrets
+            - secretRef:
+                name: rabbitmq-secrets
+            - secretRef:
+                name: api-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+# Transcription Worker - Handles async transcription
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcription-worker
+  namespace: builder-engine
+  labels:
+    app: transcription-worker
+    tier: worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: transcription-worker
+  template:
+    metadata:
+      labels:
+        app: transcription-worker
+        tier: worker
+    spec:
+      containers:
+        - name: transcription-worker
+          image: builderengine/workers:latest
+          command: ["python", "-m", "app.workers.transcription_worker"]
+          envFrom:
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: api-secrets
+            - secretRef:
+                name: storage-secrets
+            - secretRef:
+                name: rabbitmq-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+---
+# Analytics Worker - Processes analytics data
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-worker
+  namespace: builder-engine
+  labels:
+    app: analytics-worker
+    tier: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analytics-worker
+  template:
+    metadata:
+      labels:
+        app: analytics-worker
+        tier: worker
+    spec:
+      containers:
+        - name: analytics-worker
+          image: builderengine/workers:latest
+          command: ["python", "-m", "app.workers.analytics_worker"]
+          envFrom:
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: database-secrets
+            - secretRef:
+                name: redis-secrets
+            - secretRef:
+                name: rabbitmq-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+---
+# Workflow Worker - Executes workflows
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflow-worker
+  namespace: builder-engine
+  labels:
+    app: workflow-worker
+    tier: worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: workflow-worker
+  template:
+    metadata:
+      labels:
+        app: workflow-worker
+        tier: worker
+    spec:
+      containers:
+        - name: workflow-worker
+          image: builderengine/workers:latest
+          command: ["python", "-m", "app.workers.workflow_worker"]
+          envFrom:
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: database-secrets
+            - secretRef:
+                name: redis-secrets
+            - secretRef:
+                name: rabbitmq-secrets
+            - secretRef:
+                name: api-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+---
+# Webhook Worker - Sends webhook deliveries
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-worker
+  namespace: builder-engine
+  labels:
+    app: webhook-worker
+    tier: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webhook-worker
+  template:
+    metadata:
+      labels:
+        app: webhook-worker
+        tier: worker
+    spec:
+      containers:
+        - name: webhook-worker
+          image: builderengine/workers:latest
+          command: ["python", "-m", "app.workers.webhook_worker"]
+          envFrom:
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: database-secrets
+            - secretRef:
+                name: redis-secrets
+            - secretRef:
+                name: rabbitmq-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+---
+# Billing Worker - Processes billing events
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-worker
+  namespace: builder-engine
+  labels:
+    app: billing-worker
+    tier: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: billing-worker
+  template:
+    metadata:
+      labels:
+        app: billing-worker
+        tier: worker
+    spec:
+      containers:
+        - name: billing-worker
+          image: builderengine/workers:latest
+          command: ["python", "-m", "app.workers.billing_worker"]
+          envFrom:
+            - configMapRef:
+                name: shared-config
+            - secretRef:
+                name: database-secrets
+            - secretRef:
+                name: redis-secrets
+            - secretRef:
+                name: rabbitmq-secrets
+            - secretRef:
+                name: api-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi

@@ -1,0 +1,375 @@
+name: CD - Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      version:
+        description: 'Version tag (leave empty for latest)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/bvrai
+
+jobs:
+  # ==========================================================================
+  # Build and Push Docker Images
+  # ==========================================================================
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service:
+          - name: platform-api
+            context: ./platform
+            dockerfile: ./platform/Dockerfile
+          - name: voice-engine
+            context: ./platform/voice
+            dockerfile: ./platform/voice/Dockerfile
+          - name: conversation-engine
+            context: ./platform/orchestrator
+            dockerfile: ./platform/orchestrator/Dockerfile
+          - name: dashboard
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+          - name: workers
+            context: ./platform/workers
+            dockerfile: ./platform/workers/Dockerfile
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+
+  # ==========================================================================
+  # Run Tests
+  # ==========================================================================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: bvrai
+          POSTGRES_PASSWORD: bvrai_test
+          POSTGRES_DB: bvrai_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run unit tests
+        env:
+          DATABASE_URL: postgresql://bvrai:bvrai_test@localhost:5432/bvrai_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          pytest tests/unit -v --cov=platform --cov-report=xml
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://bvrai:bvrai_test@localhost:5432/bvrai_test
+          REDIS_URL: redis://localhost:6379
+        run: |
+          pytest tests/integration -v --cov=platform --cov-report=xml --cov-append
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-bvrai
+
+  # ==========================================================================
+  # Deploy to Staging
+  # ==========================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://staging.bvrai.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
+
+      - name: Update image tags
+        run: |
+          cd deploy/kubernetes
+          kustomize edit set image \
+            builderengine/platform-api=${{ env.IMAGE_PREFIX }}/platform-api:${{ github.sha }} \
+            builderengine/voice-engine=${{ env.IMAGE_PREFIX }}/voice-engine:${{ github.sha }} \
+            builderengine/conversation-engine=${{ env.IMAGE_PREFIX }}/conversation-engine:${{ github.sha }} \
+            builderengine/dashboard=${{ env.IMAGE_PREFIX }}/dashboard:${{ github.sha }} \
+            builderengine/workers=${{ env.IMAGE_PREFIX }}/workers:${{ github.sha }}
+
+      - name: Deploy to Staging
+        run: |
+          kubectl apply -k deploy/kubernetes/overlays/staging
+
+      - name: Wait for rollout
+        run: |
+          kubectl -n bvrai-staging rollout status deployment/platform-api --timeout=300s
+          kubectl -n bvrai-staging rollout status deployment/voice-engine --timeout=300s
+          kubectl -n bvrai-staging rollout status deployment/conversation-engine --timeout=300s
+
+      - name: Run smoke tests
+        run: |
+          STAGING_URL="https://api.staging.bvrai.com"
+
+          # Health check
+          curl -sf "$STAGING_URL/health" || exit 1
+
+          # API version check
+          curl -sf "$STAGING_URL/api/v1/version" || exit 1
+
+          echo "Smoke tests passed!"
+
+      - name: Notify on Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Staging deployment ${{ job.status }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==========================================================================
+  # Deploy to Production
+  # ==========================================================================
+  deploy-production:
+    name: Deploy to Production
+    needs: [build, test, deploy-staging]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.environment == 'production'
+    environment:
+      name: production
+      url: https://api.bvrai.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+
+      - name: Update image tags
+        run: |
+          VERSION="${{ github.event.inputs.version || github.sha }}"
+          cd deploy/kubernetes
+          kustomize edit set image \
+            builderengine/platform-api=${{ env.IMAGE_PREFIX }}/platform-api:${VERSION} \
+            builderengine/voice-engine=${{ env.IMAGE_PREFIX }}/voice-engine:${VERSION} \
+            builderengine/conversation-engine=${{ env.IMAGE_PREFIX }}/conversation-engine:${VERSION} \
+            builderengine/dashboard=${{ env.IMAGE_PREFIX }}/dashboard:${VERSION} \
+            builderengine/workers=${{ env.IMAGE_PREFIX }}/workers:${VERSION}
+
+      - name: Create backup snapshot
+        run: |
+          # Backup current deployment state
+          kubectl -n bvrai get deployments -o yaml > /tmp/deployments-backup.yaml
+
+          # Store backup in S3
+          aws s3 cp /tmp/deployments-backup.yaml \
+            s3://${{ secrets.BACKUP_BUCKET }}/deployments/backup-$(date +%Y%m%d-%H%M%S).yaml
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
+
+      - name: Deploy to Production (Canary)
+        run: |
+          # Deploy canary version (10% traffic)
+          kubectl apply -k deploy/kubernetes/overlays/production-canary
+
+      - name: Verify canary health
+        run: |
+          # Wait for canary pods
+          kubectl -n bvrai rollout status deployment/platform-api-canary --timeout=300s
+
+          # Check canary metrics for 5 minutes
+          for i in {1..30}; do
+            ERROR_RATE=$(kubectl -n bvrai exec -it deploy/prometheus -- \
+              promql 'sum(rate(http_requests_total{status=~"5.."}[1m])) / sum(rate(http_requests_total[1m]))' \
+              | tail -1)
+
+            if (( $(echo "$ERROR_RATE > 0.05" | bc -l) )); then
+              echo "Error rate too high: $ERROR_RATE"
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+      - name: Promote to full production
+        run: |
+          # Full deployment
+          kubectl apply -k deploy/kubernetes/overlays/production
+
+          # Wait for rollout
+          kubectl -n bvrai rollout status deployment/platform-api --timeout=600s
+          kubectl -n bvrai rollout status deployment/voice-engine --timeout=600s
+          kubectl -n bvrai rollout status deployment/conversation-engine --timeout=600s
+
+      - name: Run production smoke tests
+        run: |
+          PROD_URL="https://api.bvrai.com"
+
+          # Health check
+          curl -sf "$PROD_URL/health" || exit 1
+
+          # API version check
+          VERSION=$(curl -sf "$PROD_URL/api/v1/version" | jq -r '.version')
+          echo "Deployed version: $VERSION"
+
+          # Verify agents endpoint
+          curl -sf -H "Authorization: Bearer ${{ secrets.SMOKE_TEST_API_KEY }}" \
+            "$PROD_URL/api/v1/agents" | jq .
+
+          echo "Production smoke tests passed!"
+
+      - name: Notify on Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }} - ${{ github.sha }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+  # ==========================================================================
+  # Rollback Job (Manual Trigger)
+  # ==========================================================================
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && failure()
+    environment: production
+    steps:
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+
+      - name: Rollback deployments
+        run: |
+          kubectl -n bvrai rollout undo deployment/platform-api
+          kubectl -n bvrai rollout undo deployment/voice-engine
+          kubectl -n bvrai rollout undo deployment/conversation-engine
+          kubectl -n bvrai rollout undo deployment/dashboard
+
+      - name: Verify rollback
+        run: |
+          kubectl -n bvrai rollout status deployment/platform-api --timeout=300s
+          kubectl -n bvrai rollout status deployment/voice-engine --timeout=300s
+
+      - name: Notify rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: 'warning'
+          text: 'Production ROLLBACK completed'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

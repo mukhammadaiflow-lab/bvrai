@@ -1,0 +1,468 @@
+# Builder Engine Helm Chart Values
+# Default values for production deployment
+
+global:
+  # Image settings
+  imageRegistry: builderengine
+  imagePullPolicy: Always
+  imagePullSecrets: []
+
+  # Namespace
+  namespace: builder-engine
+
+  # Environment
+  environment: production
+
+  # Domain configuration
+  domain: builderengine.io
+  apiDomain: api.builderengine.io
+  appDomain: app.builderengine.io
+  wsDomain: ws.builderengine.io
+
+  # TLS
+  tls:
+    enabled: true
+    issuer: letsencrypt-prod
+
+# Platform API Configuration
+platformApi:
+  enabled: true
+  name: platform-api
+
+  image:
+    repository: builderengine/platform-api
+    tag: latest
+
+  replicas: 3
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  ingress:
+    enabled: true
+    host: api.builderengine.io
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+
+  env:
+    LOG_LEVEL: INFO
+    WORKERS: 4
+    CORS_ORIGINS: "https://app.builderengine.io"
+
+# Voice Engine Configuration
+voiceEngine:
+  enabled: true
+  name: voice-engine
+
+  image:
+    repository: builderengine/voice-engine
+    tag: latest
+
+  replicas: 3
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 30
+    targetCPUUtilizationPercentage: 60
+
+  service:
+    type: ClusterIP
+    port: 8001
+    grpcPort: 50051
+
+  env:
+    LOG_LEVEL: INFO
+    DEFAULT_STT_PROVIDER: deepgram
+    DEFAULT_TTS_PROVIDER: elevenlabs
+    AUDIO_SAMPLE_RATE: 16000
+    VAD_ENABLED: true
+
+# Conversation Engine Configuration
+conversationEngine:
+  enabled: true
+  name: conversation-engine
+
+  image:
+    repository: builderengine/conversation-engine
+    tag: latest
+
+  replicas: 3
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+  service:
+    type: ClusterIP
+    port: 8002
+    grpcPort: 50052
+
+  env:
+    LOG_LEVEL: INFO
+    DEFAULT_LLM_PROVIDER: openai
+    DEFAULT_LLM_MODEL: gpt-4-turbo
+    MAX_CONTEXT_TOKENS: 8000
+
+# WebRTC Gateway Configuration
+webrtcGateway:
+  enabled: true
+  name: webrtc-gateway
+
+  image:
+    repository: builderengine/webrtc-gateway
+    tag: latest
+
+  replicas: 3
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+
+  service:
+    type: ClusterIP
+    httpPort: 8003
+    wsPort: 8004
+
+  mediaService:
+    type: LoadBalancer
+    port: 10000
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+
+  env:
+    LOG_LEVEL: INFO
+    ICE_SERVERS: "stun:stun.l.google.com:19302"
+    MAX_CONNECTIONS_PER_POD: 500
+
+# Dashboard Configuration
+dashboard:
+  enabled: true
+  name: dashboard
+
+  image:
+    repository: builderengine/dashboard
+    tag: latest
+
+  replicas: 3
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  ingress:
+    enabled: true
+    host: app.builderengine.io
+
+  env:
+    NEXT_PUBLIC_API_URL: "https://api.builderengine.io"
+    NEXT_PUBLIC_WS_URL: "wss://ws.builderengine.io"
+
+# Workers Configuration
+workers:
+  callWorker:
+    enabled: true
+    replicas: 5
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+  transcriptionWorker:
+    enabled: true
+    replicas: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+
+  analyticsWorker:
+    enabled: true
+    replicas: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+  workflowWorker:
+    enabled: true
+    replicas: 3
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+  webhookWorker:
+    enabled: true
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+  billingWorker:
+    enabled: true
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+# PostgreSQL Configuration
+postgresql:
+  enabled: true
+
+  image:
+    repository: postgres
+    tag: 15-alpine
+
+  replicas: 3
+
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: gp3-encrypted
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  settings:
+    maxConnections: 500
+    sharedBuffers: 256MB
+
+# Redis Configuration
+redis:
+  enabled: true
+
+  image:
+    repository: redis
+    tag: 7-alpine
+
+  cluster:
+    enabled: true
+    replicas: 6
+
+  sentinel:
+    enabled: true
+    replicas: 3
+
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: gp3-encrypted
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  settings:
+    maxmemory: 1500mb
+    maxmemoryPolicy: allkeys-lru
+
+# RabbitMQ Configuration
+rabbitmq:
+  enabled: true
+
+  image:
+    repository: rabbitmq
+    tag: 3.12-management-alpine
+
+  replicas: 3
+
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: gp3-encrypted
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+
+  prometheus:
+    enabled: true
+    retention: 15d
+    storageSize: 50Gi
+
+  grafana:
+    enabled: true
+    adminPassword: ""  # Set via secrets
+    dashboards:
+      - builder-engine-overview
+      - builder-engine-calls
+      - builder-engine-voice
+      - builder-engine-infrastructure
+
+  loki:
+    enabled: true
+    retention: 720h
+    storageSize: 50Gi
+
+  fluentBit:
+    enabled: true
+
+  otelCollector:
+    enabled: true
+    replicas: 2
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: nginx
+
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+  tls:
+    enabled: true
+    secretName: builder-engine-tls
+
+# Network Policies
+networkPolicies:
+  enabled: true
+
+  # Allow ingress from nginx ingress controller
+  ingressAllowed: true
+
+  # Internal service communication
+  internalCommunication: true
+
+  # Deny all by default
+  defaultDeny: true
+
+# Pod Disruption Budgets
+podDisruptionBudgets:
+  enabled: true
+  minAvailable: 2
+
+# Service Account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Security Context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Node Selectors
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+
+# External Secrets Operator
+externalSecrets:
+  enabled: true
+  secretStore: aws-secrets-manager
+  refreshInterval: 1h
+
+# Feature Flags
+features:
+  webrtc: true
+  workflows: true
+  analytics: true
+  multiTenancy: true
+  billing: true

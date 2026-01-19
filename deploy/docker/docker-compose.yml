@@ -1,0 +1,463 @@
+version: '3.9'
+
+# Builder Engine - Local Development Environment
+# This docker-compose file sets up all services needed for local development
+
+services:
+  # =============================================================================
+  # Core Application Services
+  # =============================================================================
+
+  api:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/api/Dockerfile
+    container_name: builderengine-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql://builderengine:builderengine@postgres:5432/builderengine
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://builderengine:builderengine@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:8000
+      - LOG_LEVEL=DEBUG
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - S3_BUCKET=${S3_BUCKET:-builderengine-dev}
+    volumes:
+      - ../../src:/app/src:ro
+      - api-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - builderengine
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/worker/Dockerfile
+    container_name: builderengine-worker
+    restart: unless-stopped
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://builderengine:builderengine@postgres:5432/builderengine
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://builderengine:builderengine@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - WORKER_CONCURRENCY=4
+      - LOG_LEVEL=DEBUG
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - S3_BUCKET=${S3_BUCKET:-builderengine-dev}
+    volumes:
+      - ../../src:/app/src:ro
+      - worker-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - builderengine
+    deploy:
+      replicas: 2
+
+  scheduler:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/worker/Dockerfile
+    container_name: builderengine-scheduler
+    restart: unless-stopped
+    command: ["celery", "-A", "src.workers.celery_app", "beat", "--loglevel=info"]
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://builderengine:builderengine@postgres:5432/builderengine
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://builderengine:builderengine@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+    volumes:
+      - ../../src:/app/src:ro
+    depends_on:
+      - worker
+    networks:
+      - builderengine
+
+  frontend:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/frontend/Dockerfile
+      target: development
+    container_name: builderengine-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:${API_PORT:-8000}
+      - NEXT_PUBLIC_WS_URL=ws://localhost:${API_PORT:-8000}
+      - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
+    volumes:
+      - ../../frontend:/app:cached
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    networks:
+      - builderengine
+
+  # =============================================================================
+  # Voice Processing Services
+  # =============================================================================
+
+  voice-gateway:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/api/Dockerfile
+    container_name: builderengine-voice-gateway
+    restart: unless-stopped
+    command: ["python", "-m", "src.voice.gateway"]
+    ports:
+      - "${VOICE_WS_PORT:-8001}:8001"
+      - "${VOICE_SIP_PORT:-5060}:5060/udp"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://builderengine:builderengine@postgres:5432/builderengine
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://builderengine:builderengine@rabbitmq:5672/
+      - VOICE_WS_PORT=8001
+      - VOICE_SIP_PORT=5060
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../src:/app/src:ro
+    depends_on:
+      - api
+      - redis
+    networks:
+      - builderengine
+
+  transcription-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/api/Dockerfile
+    container_name: builderengine-transcription
+    restart: unless-stopped
+    command: ["python", "-m", "src.voice.transcription_service"]
+    environment:
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://builderengine:builderengine@rabbitmq:5672/
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../src:/app/src:ro
+    depends_on:
+      - redis
+      - rabbitmq
+    networks:
+      - builderengine
+    deploy:
+      replicas: 2
+
+  tts-service:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/api/Dockerfile
+    container_name: builderengine-tts
+    restart: unless-stopped
+    command: ["python", "-m", "src.voice.tts_service"]
+    environment:
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://builderengine:builderengine@rabbitmq:5672/
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../src:/app/src:ro
+    depends_on:
+      - redis
+      - rabbitmq
+    networks:
+      - builderengine
+    deploy:
+      replicas: 2
+
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: builderengine-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=builderengine
+      - POSTGRES_PASSWORD=builderengine
+      - POSTGRES_DB=builderengine
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts/postgres:/docker-entrypoint-initdb.d:ro
+    networks:
+      - builderengine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U builderengine -d builderengine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+
+  redis:
+    image: redis:7-alpine
+    container_name: builderengine-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+      - ./init-scripts/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - builderengine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: builderengine-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=builderengine
+      - RABBITMQ_DEFAULT_PASS=builderengine
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./init-scripts/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./init-scripts/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      - builderengine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # =============================================================================
+  # Vector Database for Knowledge Base
+  # =============================================================================
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: builderengine-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - builderengine
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+
+  # =============================================================================
+  # Monitoring & Observability
+  # =============================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: builderengine-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - builderengine
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: builderengine-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - builderengine
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    container_name: builderengine-jaeger
+    restart: unless-stopped
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "6831:6831/udp"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=9411
+    networks:
+      - builderengine
+
+  # =============================================================================
+  # Nginx Reverse Proxy (Optional - for production-like setup)
+  # =============================================================================
+
+  nginx:
+    image: nginx:alpine
+    container_name: builderengine-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - builderengine
+    profiles:
+      - production
+
+  # =============================================================================
+  # Development Tools
+  # =============================================================================
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: builderengine-mailhog
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_UI_PORT:-8025}:8025"
+    networks:
+      - builderengine
+    profiles:
+      - dev
+
+  pgadmin:
+    image: dpage/pgadmin4:8.0
+    container_name: builderengine-pgadmin
+    restart: unless-stopped
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@builderengine.local
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - builderengine
+    profiles:
+      - dev
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  builderengine:
+    name: builderengine-network
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  postgres-data:
+    name: builderengine-postgres
+  redis-data:
+    name: builderengine-redis
+  rabbitmq-data:
+    name: builderengine-rabbitmq
+  qdrant-data:
+    name: builderengine-qdrant
+  prometheus-data:
+    name: builderengine-prometheus
+  grafana-data:
+    name: builderengine-grafana
+  api-logs:
+    name: builderengine-api-logs
+  worker-logs:
+    name: builderengine-worker-logs
+  pgadmin-data:
+    name: builderengine-pgadmin

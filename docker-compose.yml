@@ -1,0 +1,322 @@
+# Builder Engine - Docker Compose Configuration
+# Production-ready voice AI platform
+
+version: '3.8'
+
+services:
+  # ============================================
+  # CORE SERVICES
+  # ============================================
+
+  # Telephony Gateway - Handles Twilio/phone calls
+  telephony-gateway:
+    build:
+      context: ./services/telephony-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - TWILIO_WEBHOOK_URL=${TWILIO_WEBHOOK_URL:-http://localhost:8080}
+      - MEDIA_PIPELINE_URL=media-pipeline:8081
+      - MAX_CONCURRENT_CALLS=100
+    depends_on:
+      - asr-service
+      - tts-service
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ASR Service - Speech-to-text
+  asr-service:
+    build:
+      context: ./services/asr-service
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - LOG_LEVEL=info
+      - ASR_PROVIDER=${ASR_PROVIDER:-mock}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - DEEPGRAM_MODEL=nova-2
+      - MAX_CONNECTIONS=100
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # TTS Service - Text-to-speech
+  tts-service:
+    build:
+      context: ./services/tts-service
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - LOG_LEVEL=info
+      - TTS_PROVIDER=${TTS_PROVIDER:-mock}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Conversation Engine - Turn management & state
+  conversation-engine:
+    build:
+      context: ./services/conversation-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      - PORT=8084
+      - LOG_LEVEL=info
+      - ASR_SERVICE_URL=http://asr-service:8082
+      - TTS_SERVICE_URL=http://tts-service:8083
+      - AI_ORCHESTRATOR_URL=http://ai-orchestrator:8085
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - asr-service
+      - tts-service
+      - ai-orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # AI Orchestrator - LLM & RAG
+  ai-orchestrator:
+    build:
+      context: ./services/ai-orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+      - LOG_LEVEL=info
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_MODEL=gpt-4o-mini
+      - RAG_ENABLED=true
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      - qdrant
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Platform API - Central API for agents, calls, analytics
+  platform-api:
+    build:
+      context: ./services/platform-api
+      dockerfile: Dockerfile
+    ports:
+      - "8086:8086"
+    environment:
+      - PORT=8086
+      - LOG_LEVEL=info
+      - DATABASE_URL=postgresql+asyncpg://bvrai:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/bvrai
+      - REDIS_URL=redis://redis:6379/0
+      - TELEPHONY_GATEWAY_URL=http://telephony-gateway:8080
+      - CONVERSATION_ENGINE_URL=http://conversation-engine:8084
+      - AI_ORCHESTRATOR_URL=http://ai-orchestrator:8085
+    depends_on:
+      - postgres
+      - redis
+      - ai-orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Media Pipeline - Real-time audio processing
+  media-pipeline:
+    build:
+      context: ./services/media-pipeline
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - LOG_LEVEL=info
+      - ASR_SERVICE_URL=http://asr-service:8082
+      - TTS_SERVICE_URL=http://tts-service:8083
+      - CONVERSATION_ENGINE_URL=http://conversation-engine:8084
+      - REDIS_URL=redis://redis:6379/0
+      - MAX_CONCURRENT_SESSIONS=500
+    depends_on:
+      - redis
+      - asr-service
+      - tts-service
+    volumes:
+      - recordings-data:/app/recordings
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # WebRTC Gateway - Browser-based calls
+  webrtc-gateway:
+    build:
+      context: ./services/webrtc-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8087:8087"
+      - "3478:3478/udp"  # TURN/STUN
+    environment:
+      - PORT=8087
+      - LOG_LEVEL=info
+      - CONVERSATION_ENGINE_URL=http://conversation-engine:8084
+      - PLATFORM_API_URL=http://platform-api:8086
+      - REDIS_URL=redis://redis:6379/0
+      - TURN_SECRET=${TURN_SECRET:-dev_turn_secret}
+    depends_on:
+      - redis
+      - conversation-engine
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
+  # INFRASTRUCTURE
+  # ============================================
+
+  # Redis - Caching & pub/sub
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Qdrant - Vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # PostgreSQL - Primary database
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=bvrai
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-devpassword}
+      - POSTGRES_DB=bvrai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bvrai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # LEGACY SERVICES (from initial scaffold)
+  # ============================================
+
+  # Dialog Manager (legacy - for backward compat)
+  dialog-manager:
+    build:
+      context: ./services/dialog-manager
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=3003
+      - LLM_PROVIDER=mock
+      - VECTOR_DB_PROVIDER=local
+      - VECTOR_DB_PATH=/app/data/vectors.db
+    volumes:
+      - dialog-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3003/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # Ingestion Service
+  ingestion-service:
+    build:
+      context: ./services/ingestion-service
+      dockerfile: Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      - ENVIRONMENT=development
+      - PORT=3004
+      - VECTOR_DB_PATH=/app/data/vectors.db
+      - TENANT_CONFIG_PATH=/app/data/tenants
+    volumes:
+      - ingestion-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3004/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  qdrant-data:
+  postgres-data:
+  dialog-data:
+  ingestion-data:
+  recordings-data:
+
+networks:
+  default:
+    name: bvrai-network

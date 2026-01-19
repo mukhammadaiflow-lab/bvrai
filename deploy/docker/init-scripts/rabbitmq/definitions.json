@@ -1,0 +1,217 @@
+{
+  "rabbit_version": "3.12.0",
+  "users": [
+    {
+      "name": "builderengine",
+      "password_hash": "hashed_password",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "builderengine",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "queues": [
+    {
+      "name": "default",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 86400000
+      }
+    },
+    {
+      "name": "calls",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 3600000,
+        "x-max-priority": 10
+      }
+    },
+    {
+      "name": "transcription",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 3600000
+      }
+    },
+    {
+      "name": "tts",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 3600000
+      }
+    },
+    {
+      "name": "campaigns",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 86400000
+      }
+    },
+    {
+      "name": "webhooks",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 86400000,
+        "x-dead-letter-exchange": "dlx",
+        "x-dead-letter-routing-key": "webhooks.dead"
+      }
+    },
+    {
+      "name": "analytics",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic",
+        "x-message-ttl": 86400000
+      }
+    },
+    {
+      "name": "webhooks.dead",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "classic"
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "builderengine",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "events",
+      "vhost": "/",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "default",
+      "destination_type": "queue",
+      "routing_key": "default.#",
+      "arguments": {}
+    },
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "calls",
+      "destination_type": "queue",
+      "routing_key": "calls.#",
+      "arguments": {}
+    },
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "transcription",
+      "destination_type": "queue",
+      "routing_key": "transcription.#",
+      "arguments": {}
+    },
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "tts",
+      "destination_type": "queue",
+      "routing_key": "tts.#",
+      "arguments": {}
+    },
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "campaigns",
+      "destination_type": "queue",
+      "routing_key": "campaigns.#",
+      "arguments": {}
+    },
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "webhooks",
+      "destination_type": "queue",
+      "routing_key": "webhooks.#",
+      "arguments": {}
+    },
+    {
+      "source": "builderengine",
+      "vhost": "/",
+      "destination": "analytics",
+      "destination_type": "queue",
+      "routing_key": "analytics.#",
+      "arguments": {}
+    },
+    {
+      "source": "dlx",
+      "vhost": "/",
+      "destination": "webhooks.dead",
+      "destination_type": "queue",
+      "routing_key": "webhooks.dead",
+      "arguments": {}
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "ha-all",
+      "pattern": ".*",
+      "apply-to": "queues",
+      "definition": {
+        "ha-mode": "all",
+        "ha-sync-mode": "automatic"
+      },
+      "priority": 0
+    }
+  ]
+}
