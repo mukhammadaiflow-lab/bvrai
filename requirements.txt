@@ -56,5 +56,5 @@ cachetools==5.3.2
 orjson==3.9.13
 
 # Testing (optional - can remove for smaller image)
-pytest==8.0.0
+pytest==7.4.4
 pytest-asyncio==0.23.4
