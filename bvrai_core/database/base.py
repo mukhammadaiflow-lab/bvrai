@@ -141,6 +141,46 @@ class AuditMixin:
     )
 
 
+class OptimisticLockMixin:
+    """Mixin for optimistic locking to prevent concurrent update conflicts.
+
+    Uses a version column that auto-increments on each update.
+    SQLAlchemy will raise StaleDataError if version doesn't match.
+
+    Usage:
+        class MyModel(Base, OptimisticLockMixin):
+            __tablename__ = "my_table"
+            ...
+
+        # Update will fail if another transaction modified the record
+        instance.name = "new name"
+        session.commit()  # Raises StaleDataError if version mismatch
+
+    Manual version check:
+        if instance.version != expected_version:
+            raise ConcurrencyError("Record was modified by another user")
+    """
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        nullable=False,
+    )
+
+    __mapper_args__ = {
+        "version_id_col": "version",
+        "version_id_generator": lambda v: (v or 0) + 1,
+    }
+
+
+class ConcurrencyError(Exception):
+    """Raised when optimistic lock detects concurrent modification."""
+
+    def __init__(self, message: str = "Record was modified by another transaction"):
+        self.message = message
+        super().__init__(self.message)
+
+
 # =============================================================================
 # Database Manager
 # =============================================================================

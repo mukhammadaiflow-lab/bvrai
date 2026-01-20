@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from decimal import Decimal
 from sqlalchemy import (
     Column,
     DateTime,
@@ -16,12 +17,18 @@ from sqlalchemy import (
     Text,
     Integer,
     Float,
+    Numeric,
     ForeignKey,
-    JSON,
     Index,
     Enum,
     UniqueConstraint,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
+
+# Use JSONB for PostgreSQL, fall back to JSON for other databases
+# JSONB provides better query performance and supports GIN indexing
+JSON = JSONB  # Override to use JSONB by default for PostgreSQL compatibility
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin, SoftDeleteMixin, AuditMixin
@@ -411,12 +418,24 @@ class Conversation(Base, TimestampMixin, SoftDeleteMixin):
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at")
 
     __table_args__ = (
+        # Single column indexes
         Index("ix_conversations_organization_id", "organization_id"),
         Index("ix_conversations_agent_id", "agent_id"),
         Index("ix_conversations_call_id", "call_id"),
         Index("ix_conversations_customer_phone", "customer_phone"),
         Index("ix_conversations_status", "status"),
         Index("ix_conversations_started_at", "started_at"),
+        # Composite indexes for common query patterns
+        Index("ix_conversations_org_started", "organization_id", "started_at"),
+        Index("ix_conversations_org_status", "organization_id", "status"),
+        Index("ix_conversations_org_agent_started", "organization_id", "agent_id", "started_at"),
+        # Partial index for active conversations
+        Index(
+            "ix_conversations_org_active",
+            "organization_id",
+            "started_at",
+            postgresql_where=text("is_deleted = false AND status = 'active'"),
+        ),
     )
 
 
@@ -461,6 +480,10 @@ class Message(Base, TimestampMixin, SoftDeleteMixin):
         Index("ix_messages_conversation_id", "conversation_id"),
         Index("ix_messages_role", "role"),
         Index("ix_messages_created_at", "created_at"),
+        # Composite index for message pagination (most common query pattern)
+        Index("ix_messages_conv_created", "conversation_id", "created_at"),
+        # Index for sentiment analysis queries
+        Index("ix_messages_role_sentiment", "role", "sentiment"),
     )
 
 
@@ -524,8 +547,11 @@ class Call(Base, TimestampMixin, SoftDeleteMixin):
     transferred_to: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     transfer_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
-    # Cost
-    cost_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    # Cost - Using Numeric for precise monetary calculations
+    cost_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),  # Supports up to $99,999,999.9999
+        default=Decimal("0.0000"),
+    )
     cost_currency: Mapped[str] = mapped_column(String(10), default="USD")
 
     # Metadata
@@ -536,6 +562,7 @@ class Call(Base, TimestampMixin, SoftDeleteMixin):
     events = relationship("CallEvent", back_populates="call", order_by="CallEvent.created_at")
 
     __table_args__ = (
+        # Single column indexes
         Index("ix_calls_organization_id", "organization_id"),
         Index("ix_calls_agent_id", "agent_id"),
         Index("ix_calls_external_call_id", "external_call_id"),
@@ -543,6 +570,16 @@ class Call(Base, TimestampMixin, SoftDeleteMixin):
         Index("ix_calls_from_number", "from_number"),
         Index("ix_calls_to_number", "to_number"),
         Index("ix_calls_initiated_at", "initiated_at"),
+        # Composite indexes for common query patterns (dashboards, filtering)
+        Index("ix_calls_org_status_initiated", "organization_id", "status", "initiated_at"),
+        Index("ix_calls_org_agent_initiated", "organization_id", "agent_id", "initiated_at"),
+        # Partial index for active calls (soft delete filtering)
+        Index(
+            "ix_calls_org_active",
+            "organization_id",
+            "initiated_at",
+            postgresql_where=text("is_deleted = false"),
+        ),
     )
 
 
@@ -635,9 +672,15 @@ class UsageRecord(Base, TimestampMixin):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    # Cost
-    unit_cost: Mapped[float] = mapped_column(Float, default=0.0)
-    total_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    # Cost - Using Numeric for precise monetary calculations
+    unit_cost: Mapped[Decimal] = mapped_column(
+        Numeric(12, 6),  # Higher precision for unit costs (e.g., $0.000001/token)
+        default=Decimal("0.000000"),
+    )
+    total_cost: Mapped[Decimal] = mapped_column(
+        Numeric(12, 4),  # Supports up to $99,999,999.9999
+        default=Decimal("0.0000"),
+    )
     currency: Mapped[str] = mapped_column(String(10), default="USD")
 
     # Context

@@ -1,20 +1,45 @@
-"""WebRTC Gateway configuration."""
+"""WebRTC Gateway configuration.
 
+Security Note:
+    - TURN secrets MUST be provided via environment variables in production
+    - No default secrets are provided for production safety
+"""
+
+import os
+import secrets
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _is_production() -> bool:
+    """Check if running in production environment."""
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    return env in ("production", "prod", "staging")
+
+
+def _generate_dev_turn_secret() -> str:
+    """Generate a random TURN secret for development only."""
+    if _is_production():
+        raise ValueError(
+            "SECURITY ERROR: TURN_SECRET environment variable is required in production."
+        )
+    return f"dev_turn_{secrets.token_hex(16)}"
+
+
 class Settings(BaseSettings):
-    """Application settings."""
+    """Application settings with secure defaults."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    # Environment
+    environment: str = Field(default="development", description="Environment")
 
     # Server
     host: str = "0.0.0.0"
@@ -32,8 +57,22 @@ class Settings(BaseSettings):
     # TURN/STUN Configuration
     turn_enabled: bool = True
     turn_url: str = "turn:localhost:3478"
-    turn_secret: str = Field(default="dev_turn_secret")
+    turn_secret: str = Field(
+        default_factory=_generate_dev_turn_secret,
+        description="TURN server shared secret (REQUIRED in production)",
+    )
     stun_url: str = "stun:stun.l.google.com:19302"
+
+    @field_validator("turn_secret")
+    @classmethod
+    def validate_turn_secret(cls, v: str) -> str:
+        """Validate TURN secret in production."""
+        if _is_production():
+            if not v or v.startswith("dev_turn_"):
+                raise ValueError("TURN_SECRET is required in production")
+            if len(v) < 16:
+                raise ValueError("TURN_SECRET must be at least 16 characters")
+        return v
 
     # ICE Configuration
     ice_candidate_pool_size: int = 10
