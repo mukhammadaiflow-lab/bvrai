@@ -59,7 +59,8 @@ import {
   LogOut,
   Monitor,
   Smartphone,
-  Laptop
+  Laptop,
+  Info
 } from 'lucide-react';
 
 // Types
@@ -596,7 +597,9 @@ export default function TeamManagementPage() {
               {member.role.name}
             </span>
             {member.twoFactorEnabled && (
-              <ShieldCheck className="w-4 h-4 text-green-400" title="2FA Enabled" />
+              <span title="2FA Enabled">
+                <ShieldCheck className="w-4 h-4 text-green-400" />
+              </span>
             )}
           </div>
           <div className="flex items-center gap-4 text-sm text-gray-400">

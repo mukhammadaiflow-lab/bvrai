@@ -49,7 +49,6 @@ import {
   FileCode,
   FileJson,
   FileImage,
-  FilePdf,
   FileSpreadsheet,
   FileArchive,
   MessageSquare,
@@ -158,7 +157,7 @@ const sourceTypeConfig: Record<
 // File type icons
 const getFileIcon = (mimeType?: string) => {
   if (!mimeType) return <File className="w-5 h-5" />;
-  if (mimeType.includes("pdf")) return <FilePdf className="w-5 h-5 text-red-400" />;
+  if (mimeType.includes("pdf")) return <FileText className="w-5 h-5 text-red-400" />;
   if (mimeType.includes("json")) return <FileJson className="w-5 h-5 text-yellow-400" />;
   if (mimeType.includes("image")) return <FileImage className="w-5 h-5 text-purple-400" />;
   if (mimeType.includes("spreadsheet") || mimeType.includes("excel"))

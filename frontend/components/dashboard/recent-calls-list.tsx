@@ -27,18 +27,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatDuration, formatRelativeTime, formatPhoneNumber } from "@/lib/utils";
 
-type CallStatus = "in_progress" | "completed" | "failed" | "no_answer" | "busy";
+type CallStatus = "initiated" | "ringing" | "in_progress" | "completed" | "failed" | "busy" | "no_answer";
 type CallDirection = "inbound" | "outbound";
 
 interface Call {
   id: string;
-  from_number: string;
-  to_number: string;
+  from_number: string | null;
+  to_number: string | null;
   direction: CallDirection;
   status: CallStatus;
-  duration_seconds: number;
+  duration_seconds: number | null;
   agent_id: string;
-  agent_name: string;
+  agent_name?: string;
   created_at: string;
   has_recording?: boolean;
   has_transcript?: boolean;
@@ -55,6 +55,16 @@ const statusConfig: Record<
   CallStatus,
   { label: string; variant: "default" | "success" | "warning" | "destructive" | "secondary"; icon: React.ElementType }
 > = {
+  initiated: {
+    label: "Initiated",
+    variant: "default",
+    icon: Phone,
+  },
+  ringing: {
+    label: "Ringing",
+    variant: "warning",
+    icon: PhoneCall,
+  },
   in_progress: {
     label: "Live",
     variant: "success",

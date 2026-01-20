@@ -81,18 +81,46 @@ export interface AgentTool {
   config: Record<string, unknown>;
 }
 
+export interface AgentSettings {
+  allow_interruptions?: boolean;
+  end_call_on_silence?: boolean;
+  silence_timeout?: number;
+  max_call_duration?: number;
+  record_calls?: boolean;
+}
+
+export interface AgentVoiceConfig {
+  provider?: string;
+  voice_id?: string;
+  voice_name?: string;
+  language?: string;
+  speaking_rate?: number;
+  pitch?: number;
+}
+
 export interface Agent extends BaseEntity {
   organization_id: string;
   name: string;
   description: string | null;
   system_prompt: string | null;
+  greeting_message?: string | null;
   voice_config_id: string | null;
+  voice_config?: AgentVoiceConfig | null;
   llm_config: AgentLLMConfig | null;
   tools: AgentTool[];
   status: AgentStatus;
   version: number;
+  settings?: AgentSettings | null;
   created_by: string | null;
   updated_by: string | null;
+  // Statistics fields (computed/aggregated)
+  total_calls?: number;
+  calls_trend?: number;
+  success_rate?: number;
+  success_trend?: number;
+  avg_duration?: number;
+  active_sessions?: number;
+  performance_score?: number;
 }
 
 export interface AgentVersion extends BaseEntity {
@@ -185,9 +213,28 @@ export type CallStatus =
 export type ConversationStatus = "active" | "completed" | "transferred" | "failed";
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 
+export interface CallTranscriptMessage {
+  role?: string;
+  speaker?: string;
+  content?: string;
+  text?: string;
+  timestamp?: number;
+  start_time?: number;
+  sentiment?: string;
+  confidence?: number;
+  tool_use?: unknown;
+}
+
+export interface CallSentimentScores {
+  positive?: number;
+  neutral?: number;
+  negative?: number;
+}
+
 export interface Call extends BaseEntity {
   organization_id: string;
   agent_id: string;
+  agent_name?: string;
   conversation_id: string | null;
   external_call_id: string | null;
   direction: CallDirection;
@@ -195,13 +242,33 @@ export interface Call extends BaseEntity {
   to_number: string | null;
   status: CallStatus;
   hangup_reason: string | null;
+  end_reason?: string;
   recording_url: string | null;
   started_at: string | null;
+  initiated_at?: string | null;
   answered_at: string | null;
   ended_at: string | null;
   duration_seconds: number | null;
+  duration?: number;
   cost_cents: number | null;
+  cost?: number;
   metadata: Record<string, unknown>;
+  // Transcript and analysis
+  transcript?: CallTranscriptMessage[];
+  summary?: string;
+  key_points?: string[];
+  topics?: string[];
+  intents?: string[];
+  action_items?: string[];
+  // Sentiment analysis
+  sentiment?: string;
+  sentiment_scores?: CallSentimentScores;
+  confidence?: number;
+  // Technical details
+  llm_model?: string;
+  voice_name?: string;
+  provider?: string;
+  region?: string;
 }
 
 export interface Conversation extends BaseEntity {

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import DashboardLayout from "../components/DashboardLayout";
+import DashboardLayout from "@/components/DashboardLayout";
 import {
   Beaker,
   FlaskConical,
@@ -9,7 +9,7 @@ import {
   GitBranch,
   Play,
   Pause,
-  Stop,
+  StopCircle,
   Plus,
   Search,
   Filter,
@@ -466,7 +466,7 @@ const getStatusIcon = (status: ExperimentStatus) => {
     case "completed":
       return <CheckCircle className="w-4 h-4" />;
     case "stopped":
-      return <Stop className="w-4 h-4" />;
+      return <StopCircle className="w-4 h-4" />;
   }
 };
 
@@ -563,7 +563,9 @@ const ExperimentCard: React.FC<{
               <div className="flex items-center gap-2">
                 <h3 className="font-semibold text-white truncate">{experiment.name}</h3>
                 {experiment.results?.isSignificant && (
-                  <Trophy className="w-4 h-4 text-yellow-400" title="Statistically Significant" />
+                  <span title="Statistically Significant">
+                    <Trophy className="w-4 h-4 text-yellow-400" />
+                  </span>
                 )}
               </div>
               <p className="text-sm text-gray-400 line-clamp-1 mt-0.5">{experiment.description}</p>
@@ -662,7 +664,7 @@ const ExperimentCard: React.FC<{
                         }}
                         className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2"
                       >
-                        <Stop className="w-4 h-4" />
+                        <StopCircle className="w-4 h-4" />
                         Stop Experiment
                       </button>
                     )}

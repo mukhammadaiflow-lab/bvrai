@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import DashboardLayout from "../components/DashboardLayout";
+import DashboardLayout from "@/components/DashboardLayout";
 
 // Types
 type PromptCategory = "greeting" | "question" | "objection" | "closing" | "transfer" | "fallback" | "confirmation" | "upsell";
