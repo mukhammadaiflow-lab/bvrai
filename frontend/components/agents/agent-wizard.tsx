@@ -220,34 +220,25 @@ export function AgentWizard({ mode = "create", initialData, agentId }: AgentWiza
         name: data.name,
         description: data.description,
         system_prompt: data.system_prompt,
-        greeting_message: data.greeting_message,
-        is_active: data.is_active,
         llm_config: {
           provider: data.llm_provider,
           model: data.llm_model,
           temperature: data.temperature,
           max_tokens: data.max_tokens,
         },
-        voice_config: {
-          provider: data.voice_provider,
-          voice_id: data.voice_id,
-          voice_name: data.voice_name,
-          language: data.language,
-          speaking_rate: data.speaking_rate,
-          pitch: data.pitch,
-        },
-        tools: data.tools.map((id) => ({ type: id, enabled: true })),
-        settings: {
-          allow_interruptions: data.allow_interruptions,
-          end_call_on_silence: data.end_call_on_silence,
-          silence_timeout: data.silence_timeout,
-        },
+        tools: data.tools.map((id) => ({
+          id: `tool-${id}`,
+          type: id as "function" | "webhook" | "transfer",
+          name: id,
+          description: `${id} tool`,
+          config: {},
+        })),
       };
 
       if (mode === "edit" && agentId) {
-        return agents.update(agentId, payload);
+        return agents.update(agentId, payload as any);
       }
-      return agents.create(payload);
+      return agents.create(payload as any);
     },
     onSuccess: (data) => {
       toast.success(mode === "create" ? "Agent created successfully!" : "Agent updated successfully!");

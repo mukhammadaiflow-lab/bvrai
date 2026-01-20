@@ -96,9 +96,11 @@ function StatCard({
 
   if (href) {
     return (
-      <Card className={cardClass} asChild>
-        <a href={href}>{content}</a>
-      </Card>
+      <a href={href} className="block">
+        <Card className={cardClass}>
+          {content}
+        </Card>
+      </a>
     );
   }
 

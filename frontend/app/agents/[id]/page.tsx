@@ -138,11 +138,11 @@ export default function AgentDetailPage() {
 
   // Toggle active mutation
   const toggleActiveMutation = useMutation({
-    mutationFn: (isActive: boolean) => agents.update(agentId, { is_active: isActive }),
+    mutationFn: (isActive: boolean) => agents.update(agentId, { status: isActive ? 'active' : 'paused' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
       queryClient.invalidateQueries({ queryKey: ["agents"] });
-      toast.success(agent?.is_active ? "Agent paused" : "Agent activated");
+      toast.success(agent?.status === 'active' ? "Agent paused" : "Agent activated");
     },
     onError: (error: Error) => {
       toast.error(`Failed to update agent: ${error.message}`);
@@ -177,9 +177,7 @@ export default function AgentDetailPage() {
 
   // Helper to get agent status
   const getAgentStatus = () => {
-    if (agent?.is_active) return "active";
-    if (agent?.is_deployed) return "paused";
-    return "draft";
+    return agent?.status || "draft";
   };
 
   // Error state
@@ -226,9 +224,9 @@ export default function AgentDetailPage() {
           agentId={agentId}
           initialData={{
             name: agent.name,
-            description: agent.description,
-            system_prompt: agent.system_prompt,
-            greeting_message: agent.greeting_message,
+            description: agent.description ?? undefined,
+            system_prompt: agent.system_prompt ?? undefined,
+            greeting_message: agent.greeting_message ?? undefined,
             voice_provider: agent.voice_config?.provider,
             voice_id: agent.voice_config?.voice_id,
             voice_name: agent.voice_config?.voice_name,
@@ -240,7 +238,7 @@ export default function AgentDetailPage() {
             temperature: agent.llm_config?.temperature,
             max_tokens: agent.llm_config?.max_tokens,
             tools: agent.tools?.filter((t: any) => t.enabled).map((t: any) => t.type) || [],
-            is_active: agent.is_active,
+            is_active: agent.status === 'active',
             allow_interruptions: agent.settings?.allow_interruptions,
             end_call_on_silence: agent.settings?.end_call_on_silence,
             silence_timeout: agent.settings?.silence_timeout,
@@ -305,10 +303,10 @@ export default function AgentDetailPage() {
                 <Volume2 className="mr-1 h-3 w-3" />
                 {agent?.voice_config?.voice_name || "Default Voice"}
               </Badge>
-              {agent?.tools?.filter((t: any) => t.enabled).length > 0 && (
+              {(agent?.tools?.filter((t: any) => t.enabled).length ?? 0) > 0 && (
                 <Badge variant="secondary" className="font-normal">
                   <Wrench className="mr-1 h-3 w-3" />
-                  {agent.tools.filter((t: any) => t.enabled).length} tools
+                  {agent?.tools?.filter((t: any) => t.enabled).length} tools
                 </Badge>
               )}
             </div>
@@ -318,7 +316,7 @@ export default function AgentDetailPage() {
         <div className="flex items-center gap-2">
           <Button
             variant={status === "active" ? "outline" : "default"}
-            onClick={() => toggleActiveMutation.mutate(!agent?.is_active)}
+            onClick={() => toggleActiveMutation.mutate(agent?.status !== 'active')}
             disabled={toggleActiveMutation.isPending}
           >
             {toggleActiveMutation.isPending ? (
@@ -394,7 +392,7 @@ export default function AgentDetailPage() {
           title="Active Sessions"
           value={agent?.active_sessions || 0}
           icon={<PhoneCall className="h-5 w-5" />}
-          description={agent?.active_sessions > 0 ? "Currently on call" : "No active calls"}
+          description={(agent?.active_sessions ?? 0) > 0 ? "Currently on call" : "No active calls"}
         />
       </StatGrid>
 
@@ -457,10 +455,10 @@ export default function AgentDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {agent?.tools?.filter((t: any) => t.enabled).length > 0 ? (
+                {(agent?.tools?.filter((t: any) => t.enabled).length ?? 0) > 0 ? (
                   <div className="space-y-2">
-                    {agent.tools
-                      .filter((t: any) => t.enabled)
+                    {agent?.tools
+                      ?.filter((t: any) => t.enabled)
                       .map((tool: any) => (
                         <div
                           key={tool.type}
@@ -851,8 +849,7 @@ export default function AgentDetailPage() {
                     value={(agent?.performance_score || 0.85) * 100}
                     size={160}
                     strokeWidth={12}
-                    showValue
-                    valueFormat={(v) => `${v.toFixed(0)}%`}
+                    showLabel
                   />
                 </div>
                 <p className="text-center text-sm text-muted-foreground">

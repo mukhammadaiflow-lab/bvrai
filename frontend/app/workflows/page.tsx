@@ -30,6 +30,7 @@ import {
   GitBranch,
   ArrowRight,
   ArrowDown,
+  ArrowLeft,
   CheckCircle,
   XCircle,
   AlertCircle,

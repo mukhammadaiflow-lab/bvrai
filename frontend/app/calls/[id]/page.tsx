@@ -99,9 +99,9 @@ export default function CallDetailPage() {
     queryKey: ["call", callId],
     queryFn: () => calls.get(callId),
     enabled: !!callId,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
       // Auto-refresh if call is in progress
-      return data?.status === "in_progress" ? 5000 : false;
+      return query.state.data?.status === "in_progress" ? 5000 : false;
     },
   });
 
@@ -204,8 +204,8 @@ export default function CallDetailPage() {
               <h1 className="text-2xl font-bold">
                 {formatPhoneNumber(isInbound ? call?.from_number : call?.to_number)}
               </h1>
-              <Badge className={getStatusColor(call?.status)}>
-                {call?.status?.replace("_", " ")}
+              <Badge className={getStatusColor(call?.status || "pending")}>
+                {call?.status?.replace("_", " ") || "pending"}
               </Badge>
               {call?.status === "in_progress" && (
                 <span className="flex items-center gap-1 text-sm text-green-600">
@@ -421,9 +421,9 @@ export default function CallDetailPage() {
                 <CardTitle>Key Points</CardTitle>
               </CardHeader>
               <CardContent>
-                {call?.key_points?.length > 0 ? (
+                {(call?.key_points?.length ?? 0) > 0 ? (
                   <ul className="space-y-2">
-                    {call.key_points.map((point: string, index: number) => (
+                    {call?.key_points?.map((point: string, index: number) => (
                       <li key={index} className="flex items-start gap-2 text-sm">
                         <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
                         <span>{point}</span>
@@ -595,9 +595,9 @@ export default function CallDetailPage() {
                 <CardTitle>Topics Discussed</CardTitle>
               </CardHeader>
               <CardContent>
-                {call?.topics?.length > 0 ? (
+                {(call?.topics?.length ?? 0) > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {call.topics.map((topic: string, index: number) => (
+                    {call?.topics?.map((topic: string, index: number) => (
                       <Badge key={index} variant="secondary">
                         {topic}
                       </Badge>
@@ -617,9 +617,9 @@ export default function CallDetailPage() {
                 <CardTitle>Detected Intents</CardTitle>
               </CardHeader>
               <CardContent>
-                {call?.intents?.length > 0 ? (
+                {(call?.intents?.length ?? 0) > 0 ? (
                   <div className="space-y-2">
-                    {call.intents.map((intent: any, index: number) => (
+                    {call?.intents?.map((intent: any, index: number) => (
                       <div key={index} className="flex items-center justify-between p-2 rounded bg-muted/50">
                         <span className="text-sm font-medium">{intent.name}</span>
                         <span className="text-xs text-muted-foreground">
@@ -642,9 +642,9 @@ export default function CallDetailPage() {
                 <CardTitle>Action Items</CardTitle>
               </CardHeader>
               <CardContent>
-                {call?.action_items?.length > 0 ? (
+                {(call?.action_items?.length ?? 0) > 0 ? (
                   <ul className="space-y-2">
-                    {call.action_items.map((item: string, index: number) => (
+                    {call?.action_items?.map((item: string, index: number) => (
                       <li key={index} className="flex items-start gap-2 text-sm">
                         <div className="h-5 w-5 rounded border flex items-center justify-center shrink-0 mt-0.5">
                           <span className="text-xs text-muted-foreground">{index + 1}</span>

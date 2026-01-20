@@ -17,7 +17,7 @@ import {
   Clock,
   RefreshCw,
   Headphones,
-  Waveform,
+  Activity,
   ChevronRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";

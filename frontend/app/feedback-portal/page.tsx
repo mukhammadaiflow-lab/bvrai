@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import DashboardLayout from "../components/DashboardLayout";
+import DashboardLayout from "@/components/DashboardLayout";
 
 // Types
 type FeedbackType = "rating" | "survey" | "review" | "suggestion" | "complaint" | "praise";
@@ -81,6 +81,7 @@ interface FeedbackMetrics {
   negativeSentiment: number;
   pendingFollowUps: number;
   escalatedCount: number;
+  skillsAcquired: number;
 }
 
 interface TrendDataPoint {
@@ -350,6 +351,7 @@ const mockMetrics: FeedbackMetrics = {
   negativeSentiment: 15,
   pendingFollowUps: 12,
   escalatedCount: 3,
+  skillsAcquired: 156,
 };
 
 const mockTrendData: TrendDataPoint[] = [

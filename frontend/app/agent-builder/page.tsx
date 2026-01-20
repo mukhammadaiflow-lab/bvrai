@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useMemo } from "react";
-import DashboardLayout from "../components/DashboardLayout";
+import DashboardLayout from "@/components/DashboardLayout";
 
 // Types
 type NodeType = "start" | "greeting" | "question" | "response" | "condition" | "transfer" | "end" | "api" | "wait" | "variable" | "loop" | "webhook";
