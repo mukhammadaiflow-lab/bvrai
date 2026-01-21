@@ -17,11 +17,13 @@ import {
   Bot,
   Database,
   Zap,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 
 type SettingsTab = "general" | "defaults" | "notifications" | "security" | "advanced";
@@ -30,6 +32,8 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [hasChanges, setHasChanges] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showDeleteDataDialog, setShowDeleteDataDialog] = useState(false);
+  const [showDeleteOrgDialog, setShowDeleteOrgDialog] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
@@ -82,27 +86,25 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="flex gap-6">
-        {/* Sidebar Tabs */}
-        <div className="w-48 shrink-0">
-          <nav className="space-y-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as SettingsTab)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
-                  activeTab === tab.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <tab.icon className="h-4 w-4" />
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Tabs Navigation - Horizontal scrolling on mobile, vertical sidebar on desktop */}
+        <nav className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 lg:w-48 lg:shrink-0 scrollbar-thin">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as SettingsTab)}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors whitespace-nowrap lg:w-full",
+                activeTab === tab.id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <tab.icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          ))}
+        </nav>
 
         {/* Content */}
         <div className="flex-1 space-y-6">
@@ -545,7 +547,10 @@ export default function SettingsPage() {
 
               <Card className="border-red-200">
                 <CardHeader>
-                  <CardTitle className="text-red-600">Danger Zone</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-red-600" />
+                    <CardTitle className="text-red-600">Danger Zone</CardTitle>
+                  </div>
                   <CardDescription>
                     Irreversible actions for your organization
                   </CardDescription>
@@ -556,17 +561,58 @@ export default function SettingsPage() {
                       <p className="font-medium">Delete all data</p>
                       <p className="text-sm text-muted-foreground">Permanently delete all calls and conversations</p>
                     </div>
-                    <Button variant="destructive" size="sm">Delete Data</Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setShowDeleteDataDialog(true)}
+                    >
+                      Delete Data
+                    </Button>
                   </div>
                   <div className="flex items-center justify-between rounded-lg border border-red-200 p-4">
                     <div>
                       <p className="font-medium">Delete organization</p>
                       <p className="text-sm text-muted-foreground">Permanently delete your entire organization</p>
                     </div>
-                    <Button variant="destructive" size="sm">Delete Organization</Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setShowDeleteOrgDialog(true)}
+                    >
+                      Delete Organization
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Confirmation Dialogs */}
+              <ConfirmDialog
+                open={showDeleteDataDialog}
+                onOpenChange={setShowDeleteDataDialog}
+                title="Delete All Data"
+                description="This action cannot be undone. This will permanently delete all your calls, conversations, recordings, and analytics data. Are you sure you want to proceed?"
+                confirmText="Delete All Data"
+                destructive
+                onConfirm={async () => {
+                  // In production, this would call an API endpoint
+                  await new Promise((resolve) => setTimeout(resolve, 1000));
+                  setShowDeleteDataDialog(false);
+                }}
+              />
+
+              <ConfirmDialog
+                open={showDeleteOrgDialog}
+                onOpenChange={setShowDeleteOrgDialog}
+                title="Delete Organization"
+                description="This action cannot be undone. This will permanently delete your entire organization, including all agents, calls, team members, and billing data. This action is irreversible."
+                confirmText="Delete Organization"
+                destructive
+                onConfirm={async () => {
+                  // In production, this would call an API endpoint
+                  await new Promise((resolve) => setTimeout(resolve, 1000));
+                  setShowDeleteOrgDialog(false);
+                }}
+              />
             </>
           )}
         </div>
