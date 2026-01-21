@@ -1,13 +1,34 @@
 """
 Configuration for Flow Builder Service.
+
+Security Note:
+    - All secrets MUST be provided via environment variables
+    - No default secrets are provided for production safety
 """
 
+import os
+import secrets
 from enum import Enum
 from functools import lru_cache
 from typing import Dict, List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _is_production() -> bool:
+    """Check if running in production environment."""
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    return env in ("production", "prod", "staging")
+
+
+def _generate_dev_secret() -> str:
+    """Generate a random secret for development only."""
+    if _is_production():
+        raise ValueError(
+            "SECURITY ERROR: JWT_SECRET environment variable is required in production."
+        )
+    return f"dev_only_{secrets.token_hex(32)}"
 
 
 class NodeCategory(str, Enum):
@@ -218,9 +239,26 @@ class Settings(BaseSettings):
     api_prefix: str = Field(default="/api/v1", description="API prefix")
     enable_docs: bool = Field(default=True, description="Enable API docs")
 
+    # Environment
+    environment: str = Field(default="development", description="Environment")
+
     # Authentication
     auth_enabled: bool = Field(default=True, description="Enable authentication")
-    jwt_secret: str = Field(default="change-me-in-production", description="JWT secret")
+    jwt_secret: str = Field(
+        default_factory=_generate_dev_secret,
+        description="JWT secret (REQUIRED in production)",
+    )
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """Validate JWT secret meets security requirements."""
+        if _is_production():
+            if not v or v.startswith("dev_only_") or v == "change-me-in-production":
+                raise ValueError("JWT_SECRET is required in production")
+            if len(v) < 32:
+                raise ValueError("JWT_SECRET must be at least 32 characters")
+        return v
 
     # Sub-configurations
     canvas: CanvasConfig = Field(default_factory=CanvasConfig)
