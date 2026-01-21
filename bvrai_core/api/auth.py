@@ -352,7 +352,10 @@ class APIAuthenticator:
         self.jwt_config = jwt_config
         self._api_key_lookup = api_key_lookup
         self._api_key_cache: Dict[str, Tuple[APIKeyInfo, datetime]] = {}
-        self._cache_ttl = timedelta(minutes=5)
+        # SECURITY: Reduced from 5 minutes to 30 seconds to minimize window
+        # for revoked keys to remain valid. For high-security environments,
+        # consider using event-based invalidation instead of TTL.
+        self._cache_ttl = timedelta(seconds=30)
 
     def authenticate_api_key(
         self,
@@ -651,6 +654,45 @@ class APIAuthenticator:
     def clear_cache(self) -> None:
         """Clear the API key cache."""
         self._api_key_cache.clear()
+
+    def invalidate_key(self, key_hash: str) -> bool:
+        """
+        Invalidate a specific API key from cache.
+
+        Call this when an API key is revoked to immediately
+        prevent further use.
+
+        Args:
+            key_hash: The hash of the API key to invalidate
+
+        Returns:
+            True if the key was in cache and removed
+        """
+        if key_hash in self._api_key_cache:
+            del self._api_key_cache[key_hash]
+            return True
+        return False
+
+    def invalidate_organization_keys(self, organization_id: str) -> int:
+        """
+        Invalidate all cached keys for an organization.
+
+        Call this when organization access is revoked.
+
+        Args:
+            organization_id: The organization ID
+
+        Returns:
+            Number of keys invalidated
+        """
+        keys_to_remove = [
+            key_hash
+            for key_hash, (info, _) in self._api_key_cache.items()
+            if info.organization_id == organization_id
+        ]
+        for key_hash in keys_to_remove:
+            del self._api_key_cache[key_hash]
+        return len(keys_to_remove)
 
 
 def require_permission(permission: Permission) -> Callable:

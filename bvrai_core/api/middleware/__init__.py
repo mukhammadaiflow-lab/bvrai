@@ -27,6 +27,13 @@ from .tracking import (
     RequestTrackingMiddleware,
 )
 
+from .org_context import (
+    OrgContextMiddleware,
+    set_org_context_for_session,
+    async_set_org_context,
+    get_org_context_dependency,
+)
+
 
 __all__ = [
     # Rate limiting
@@ -45,4 +52,9 @@ __all__ = [
     "RequestTracker",
     "RequestContext",
     "RequestTrackingMiddleware",
+    # Organization Context (RLS)
+    "OrgContextMiddleware",
+    "set_org_context_for_session",
+    "async_set_org_context",
+    "get_org_context_dependency",
 ]

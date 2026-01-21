@@ -39,6 +39,7 @@ from .middleware import (
     RequestTracker,
     RequestTrackingMiddleware,
 )
+from ..security.cors import CORSConfig, get_cors_middleware_config, validate_cors_config
 from .routes import (
     agents_router,
     calls_router,
@@ -71,9 +72,8 @@ class AppConfig(BaseModel):
     debug: bool = False
     docs_enabled: bool = True
 
-    # CORS
-    cors_origins: list = ["*"]
-    cors_allow_credentials: bool = True
+    # CORS - Use secure environment-based configuration
+    cors_config: Optional[CORSConfig] = None
 
     # Auth
     jwt_secret: Optional[str] = None
@@ -89,15 +89,26 @@ class AppConfig(BaseModel):
     log_requests: bool = True
     log_format: str = "json"
 
+    class Config:
+        arbitrary_types_allowed = True
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         """Load configuration from environment variables."""
+        # Load secure CORS configuration based on environment
+        cors_config = CORSConfig.from_env()
+
+        # Validate CORS config and log warnings
+        cors_warnings = validate_cors_config(cors_config)
+        for warning in cors_warnings:
+            logger.warning(warning)
+
         return cls(
             debug=os.getenv("DEBUG", "false").lower() == "true",
             jwt_secret=os.getenv("JWT_SECRET"),
             rate_limit_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")),
             rate_limit_per_day=int(os.getenv("RATE_LIMIT_PER_DAY", "10000")),
-            cors_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+            cors_config=cors_config,
         )
 
 
@@ -236,14 +247,12 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     # Add Middleware (order matters - first added = outermost)
     # ==========================================================================
 
-    # CORS
+    # CORS - Use secure environment-based configuration
+    cors_config = config.cors_config or CORSConfig.from_env()
+    cors_middleware_config = get_cors_middleware_config(cors_config)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=config.cors_origins,
-        allow_credentials=config.cors_allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
+        **cors_middleware_config,
     )
 
     # Request tracking
