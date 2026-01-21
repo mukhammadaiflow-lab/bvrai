@@ -47,24 +47,20 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy built assets
+# Copy built assets - order matters for Next.js standalone
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-# Set ownership
-RUN chown -R nextjs:nodejs /app
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-# Railway sets PORT env variable
+# Railway dynamically assigns PORT - default to 3000 for local
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD wget --spider -q http://localhost:3000/ || exit 1
+# No HEALTHCHECK - let Railway handle it
+# Railway's built-in healthcheck is more reliable
 
-# Start Next.js
-CMD ["node", "server.js"]
+# Start Next.js - use shell form to expand PORT variable
+CMD node server.js
