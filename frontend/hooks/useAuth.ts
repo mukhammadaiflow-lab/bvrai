@@ -1,18 +1,16 @@
 /**
  * Authentication Hook
  *
- * Provides authentication state management and methods using Zustand.
- * Handles login, logout, and user session persistence.
+ * Provides authentication state management using httpOnly cookies.
+ * Uses Next.js API routes for secure token handling.
  */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { authApi } from '@/lib/api';
 import { User } from '@/types';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   error: string | null;
@@ -23,13 +21,13 @@ interface AuthState {
   register: (email: string, password: string, name: string, organizationName?: string) => Promise<void>;
   fetchCurrentUser: () => Promise<void>;
   clearError: () => void;
+  setUser: (user: User | null) => void;
 }
 
 export const useAuth = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
-      token: null,
       isLoading: false,
       isAuthenticated: false,
       error: null,
@@ -37,20 +35,28 @@ export const useAuth = create<AuthState>()(
       login: async (email: string, password: string) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await authApi.login(email, password);
-          const { access_token, user } = response;
+          const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email, password }),
+            credentials: 'include', // Important for cookies
+          });
 
-          // Store token in localStorage for API client
-          localStorage.setItem('auth_token', access_token);
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || 'Login failed');
+          }
 
           set({
-            user,
-            token: access_token,
+            user: data.user,
             isAuthenticated: true,
             isLoading: false,
           });
         } catch (error: any) {
-          const message = error.response?.data?.detail || error.message || 'Login failed';
+          const message = error.message || 'Login failed';
           set({ error: message, isLoading: false });
           throw error;
         }
@@ -59,14 +65,16 @@ export const useAuth = create<AuthState>()(
       logout: async () => {
         set({ isLoading: true });
         try {
-          await authApi.logout();
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+          });
         } catch (error) {
           // Ignore logout errors, clear state anyway
+          console.error('Logout error:', error);
         } finally {
-          localStorage.removeItem('auth_token');
           set({
             user: null,
-            token: null,
             isAuthenticated: false,
             isLoading: false,
             error: null,
@@ -77,46 +85,65 @@ export const useAuth = create<AuthState>()(
       register: async (email: string, password: string, name: string, organizationName?: string) => {
         set({ isLoading: true, error: null });
         try {
-          const response = await authApi.register(email, password, name, organizationName);
-          const { access_token, user } = response;
+          const response = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email,
+              password,
+              name,
+              organization_name: organizationName,
+            }),
+            credentials: 'include',
+          });
 
-          localStorage.setItem('auth_token', access_token);
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || 'Registration failed');
+          }
 
           set({
-            user,
-            token: access_token,
+            user: data.user,
             isAuthenticated: true,
             isLoading: false,
           });
         } catch (error: any) {
-          const message = error.response?.data?.detail || error.message || 'Registration failed';
+          const message = error.message || 'Registration failed';
           set({ error: message, isLoading: false });
           throw error;
         }
       },
 
       fetchCurrentUser: async () => {
-        const token = get().token || localStorage.getItem('auth_token');
-        if (!token) {
-          set({ isAuthenticated: false });
-          return;
-        }
-
         set({ isLoading: true });
         try {
-          const user = await authApi.getCurrentUser();
+          const response = await fetch('/api/auth/me', {
+            credentials: 'include',
+          });
+
+          if (!response.ok) {
+            // Token invalid or expired
+            set({
+              user: null,
+              isAuthenticated: false,
+              isLoading: false,
+            });
+            return;
+          }
+
+          const user = await response.json();
           set({
             user,
-            token,
             isAuthenticated: true,
             isLoading: false,
           });
         } catch (error) {
           // Token invalid, clear state
-          localStorage.removeItem('auth_token');
           set({
             user: null,
-            token: null,
             isAuthenticated: false,
             isLoading: false,
           });
@@ -124,11 +151,17 @@ export const useAuth = create<AuthState>()(
       },
 
       clearError: () => set({ error: null }),
+
+      setUser: (user: User | null) => set({
+        user,
+        isAuthenticated: !!user,
+      }),
     }),
     {
       name: 'auth-storage',
       partialize: (state) => ({
-        token: state.token,
+        // Only persist user data, not the token (it's in httpOnly cookie)
+        user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
     }

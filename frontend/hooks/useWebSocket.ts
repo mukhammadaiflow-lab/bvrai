@@ -35,7 +35,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     reconnectInterval = 5000,
   } = options;
 
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -47,8 +47,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
 
     try {
-      const wsUrl = token ? `${url}?token=${token}` : url;
-      wsRef.current = new WebSocket(wsUrl);
+      // WebSocket uses cookies for authentication (same-origin requests)
+      // For cross-origin, the backend should handle auth differently
+      wsRef.current = new WebSocket(url);
 
       wsRef.current.onopen = () => {
         setIsConnected(true);
@@ -84,7 +85,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     } catch (error) {
       console.error('Failed to create WebSocket connection:', error);
     }
-  }, [url, token, onMessage, onConnect, onDisconnect, onError, autoReconnect, reconnectInterval]);
+  }, [url, onMessage, onConnect, onDisconnect, onError, autoReconnect, reconnectInterval]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
