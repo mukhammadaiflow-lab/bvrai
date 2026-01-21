@@ -13,9 +13,9 @@ dockerfilePath = "Dockerfile"
 NODE_ENV = "production"
 
 [deploy]
-# Health check
-healthcheckPath = "/"
-healthcheckTimeout = 30
+# Health check - Use dedicated API endpoint
+healthcheckPath = "/api/health"
+healthcheckTimeout = 60
 startCommand = "npm start"
 
 # Restart policy
