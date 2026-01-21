@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
+import { webhooks as webhooksApi } from "@/lib/api";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -134,126 +137,25 @@ const availableEvents: WebhookEvent[] = [
   { id: "recording.ready", label: "Recording Ready", description: "Triggered when call recording is processed", category: "Recordings" },
 ];
 
-const mockWebhooks: Webhook[] = [
-  {
-    id: "1",
-    name: "CRM Integration",
-    url: "https://api.example.com/webhooks/voice-ai",
-    events: ["call.started", "call.ended", "call.transferred"],
-    status: "active",
-    secret: "whsec_xxxxxxxxxxxxx",
-    headers: { "X-Custom-Header": "value" },
-    retryPolicy: { maxRetries: 3, retryDelay: 5000 },
-    lastTriggered: "2024-01-14T10:30:00Z",
-    successRate: 98.5,
-    totalDeliveries: 1247,
-    failedDeliveries: 19,
-    created_at: "2023-11-15T08:00:00Z",
+// Transform API webhook to component format
+const transformWebhook = (apiWebhook: any): Webhook => ({
+  id: apiWebhook.id,
+  name: apiWebhook.name,
+  url: apiWebhook.url,
+  events: apiWebhook.events || [],
+  status: apiWebhook.is_active ? (apiWebhook.failure_count > 10 ? "failing" : "active") : "disabled",
+  secret: apiWebhook.secret,
+  headers: apiWebhook.headers,
+  retryPolicy: {
+    maxRetries: apiWebhook.max_retries || 3,
+    retryDelay: apiWebhook.retry_delay_ms || 5000,
   },
-  {
-    id: "2",
-    name: "Analytics Pipeline",
-    url: "https://analytics.example.com/ingest",
-    events: ["call.ended", "conversation.message", "transcript.ready"],
-    status: "active",
-    retryPolicy: { maxRetries: 5, retryDelay: 10000 },
-    lastTriggered: "2024-01-14T10:25:00Z",
-    successRate: 100,
-    totalDeliveries: 892,
-    failedDeliveries: 0,
-    created_at: "2023-12-01T10:00:00Z",
-  },
-  {
-    id: "3",
-    name: "Slack Notifications",
-    url: "https://hooks.slack.com/services/xxx/yyy/zzz",
-    events: ["call.failed", "conversation.sentiment"],
-    status: "active",
-    retryPolicy: { maxRetries: 2, retryDelay: 3000 },
-    lastTriggered: "2024-01-14T09:15:00Z",
-    successRate: 95.2,
-    totalDeliveries: 312,
-    failedDeliveries: 15,
-    created_at: "2024-01-01T12:00:00Z",
-  },
-  {
-    id: "4",
-    name: "Legacy System",
-    url: "https://old-api.example.com/callback",
-    events: ["call.ended"],
-    status: "failing",
-    retryPolicy: { maxRetries: 3, retryDelay: 5000 },
-    lastTriggered: "2024-01-14T08:00:00Z",
-    successRate: 45.0,
-    totalDeliveries: 156,
-    failedDeliveries: 86,
-    created_at: "2023-06-15T09:00:00Z",
-  },
-];
-
-const mockDeliveryLogs: DeliveryLog[] = [
-  {
-    id: "log-1",
-    webhook_id: "1",
-    event_type: "call.ended",
-    status: "success",
-    status_code: 200,
-    response_time: 145,
-    request_body: JSON.stringify({
-      event: "call.ended",
-      timestamp: "2024-01-14T10:30:00Z",
-      data: { call_id: "call-123", duration: 245, agent_id: "agent-1" },
-    }, null, 2),
-    response_body: '{"status": "received"}',
-    timestamp: "2024-01-14T10:30:00Z",
-    retries: 0,
-  },
-  {
-    id: "log-2",
-    webhook_id: "1",
-    event_type: "call.started",
-    status: "success",
-    status_code: 200,
-    response_time: 89,
-    request_body: JSON.stringify({
-      event: "call.started",
-      timestamp: "2024-01-14T10:25:00Z",
-      data: { call_id: "call-123", caller_number: "+15551234567" },
-    }, null, 2),
-    timestamp: "2024-01-14T10:25:00Z",
-    retries: 0,
-  },
-  {
-    id: "log-3",
-    webhook_id: "4",
-    event_type: "call.ended",
-    status: "failed",
-    status_code: 500,
-    response_time: 2500,
-    request_body: JSON.stringify({
-      event: "call.ended",
-      timestamp: "2024-01-14T08:00:00Z",
-      data: { call_id: "call-120" },
-    }, null, 2),
-    error_message: "Connection timeout after 2500ms",
-    timestamp: "2024-01-14T08:00:00Z",
-    retries: 3,
-  },
-  {
-    id: "log-4",
-    webhook_id: "2",
-    event_type: "transcript.ready",
-    status: "success",
-    status_code: 201,
-    response_time: 234,
-    request_body: JSON.stringify({
-      event: "transcript.ready",
-      data: { call_id: "call-119", transcript_url: "https://..." },
-    }, null, 2),
-    timestamp: "2024-01-14T10:20:00Z",
-    retries: 0,
-  },
-];
+  lastTriggered: apiWebhook.last_triggered_at || apiWebhook.updated_at,
+  successRate: apiWebhook.success_rate || 100,
+  totalDeliveries: apiWebhook.total_deliveries || 0,
+  failedDeliveries: apiWebhook.failed_deliveries || 0,
+  created_at: apiWebhook.created_at,
+});
 
 // Utility functions
 const formatRelativeTime = (date: string): string => {
@@ -1048,15 +950,104 @@ function DeliveryLogRow({ log }: { log: DeliveryLog }) {
 }
 
 export default function WebhooksPage() {
-  const [webhooks, setWebhooks] = useState<Webhook[]>(mockWebhooks);
-  const [deliveryLogs] = useState<DeliveryLog[]>(mockDeliveryLogs);
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState<Webhook | null>(null);
   const [testingWebhook, setTestingWebhook] = useState<Webhook | null>(null);
   const [activeTab, setActiveTab] = useState("webhooks");
   const [selectedWebhookForLogs, setSelectedWebhookForLogs] = useState<string>("all");
-  const [isLoading, setIsLoading] = useState(false);
+
+  // Fetch webhooks from API
+  const { data: webhooksData, isLoading } = useQuery({
+    queryKey: ["webhooks"],
+    queryFn: () => webhooksApi.list(),
+  });
+
+  // Fetch delivery logs for selected webhook
+  const { data: deliveriesData } = useQuery({
+    queryKey: ["webhooks", "deliveries", selectedWebhookForLogs],
+    queryFn: () =>
+      selectedWebhookForLogs !== "all"
+        ? webhooksApi.getDeliveries(selectedWebhookForLogs)
+        : Promise.resolve({ items: [] }),
+    enabled: selectedWebhookForLogs !== "all",
+  });
+
+  // Create webhook mutation
+  const createMutation = useMutation({
+    mutationFn: (data: Partial<Webhook>) =>
+      webhooksApi.create({
+        name: data.name,
+        url: data.url,
+        events: data.events,
+        secret: data.secret,
+        headers: data.headers,
+        max_retries: data.retryPolicy?.maxRetries,
+        retry_delay_ms: data.retryPolicy?.retryDelay,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      toast.success("Webhook created successfully");
+      setShowCreateDialog(false);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to create webhook: ${error.message}`);
+    },
+  });
+
+  // Update webhook mutation
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Webhook> }) =>
+      webhooksApi.update(id, {
+        name: data.name,
+        url: data.url,
+        events: data.events,
+        secret: data.secret,
+        headers: data.headers,
+        max_retries: data.retryPolicy?.maxRetries,
+        retry_delay_ms: data.retryPolicy?.retryDelay,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      toast.success("Webhook updated successfully");
+      setEditingWebhook(null);
+      setShowCreateDialog(false);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update webhook: ${error.message}`);
+    },
+  });
+
+  // Delete webhook mutation
+  const deleteMutation = useMutation({
+    mutationFn: (webhookId: string) => webhooksApi.delete(webhookId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+      toast.success("Webhook deleted successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to delete webhook: ${error.message}`);
+    },
+  });
+
+  // Transform API data
+  const webhooks: Webhook[] = (webhooksData || []).map(transformWebhook);
+
+  // Transform delivery logs
+  const deliveryLogs: DeliveryLog[] = (deliveriesData?.items || []).map((d: any) => ({
+    id: d.id,
+    webhook_id: d.webhook_id,
+    event_type: d.event_type,
+    status: d.status,
+    status_code: d.status_code,
+    response_time: d.response_time_ms,
+    request_body: d.request_body || "{}",
+    response_body: d.response_body,
+    error_message: d.error_message,
+    timestamp: d.created_at,
+    retries: d.retry_count || 0,
+  }));
 
   const filteredWebhooks = webhooks.filter(
     (webhook) =>
@@ -1079,45 +1070,26 @@ export default function WebhooksPage() {
 
   const handleSaveWebhook = (data: Partial<Webhook>) => {
     if (editingWebhook) {
-      setWebhooks((prev) =>
-        prev.map((w) => (w.id === editingWebhook.id ? { ...w, ...data } : w))
-      );
-      setEditingWebhook(null);
+      updateMutation.mutate({ id: editingWebhook.id, data });
     } else {
-      const newWebhook: Webhook = {
-        id: `webhook-${Date.now()}`,
-        name: data.name!,
-        url: data.url!,
-        events: data.events!,
-        status: "active",
-        secret: data.secret,
-        retryPolicy: data.retryPolicy!,
-        lastTriggered: new Date().toISOString(),
-        successRate: 100,
-        totalDeliveries: 0,
-        failedDeliveries: 0,
-        created_at: new Date().toISOString(),
-      };
-      setWebhooks((prev) => [newWebhook, ...prev]);
+      createMutation.mutate(data);
     }
-    setShowCreateDialog(false);
   };
 
   const handleDeleteWebhook = (webhookId: string) => {
-    setWebhooks((prev) => prev.filter((w) => w.id !== webhookId));
+    if (confirm("Are you sure you want to delete this webhook?")) {
+      deleteMutation.mutate(webhookId);
+    }
   };
 
   const handleToggleStatus = (webhookId: string) => {
-    setWebhooks((prev) =>
-      prev.map((w) =>
-        w.id === webhookId
-          ? {
-              ...w,
-              status: w.status === "active" ? "paused" : "active",
-            }
-          : w
-      )
-    );
+    const webhook = webhooks.find((w) => w.id === webhookId);
+    if (webhook) {
+      updateMutation.mutate({
+        id: webhookId,
+        data: { status: webhook.status === "active" ? "paused" : "active" },
+      });
+    }
   };
 
   return (

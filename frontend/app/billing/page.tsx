@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
+import { billing as billingApi, analytics } from "@/lib/api";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -117,50 +120,8 @@ interface PaymentMethod {
   isDefault: boolean;
 }
 
-// Mock data
-const currentPlan: Plan = {
-  id: "professional",
-  name: "Professional",
-  description: "Perfect for growing teams",
-  price: 99,
-  billingCycle: "monthly",
-  features: [
-    "5,000 calls/month",
-    "10,000 minutes",
-    "10 agents",
-    "10 team members",
-    "Priority support",
-    "Advanced analytics",
-    "Webhooks",
-    "API access",
-  ],
-  limits: {
-    calls: 5000,
-    minutes: 10000,
-    agents: 10,
-    team: 10,
-  },
-  current: true,
-};
-
-const usageMetrics: UsageMetric[] = [
-  { name: "Calls", icon: Phone, used: 1247, limit: 5000, trend: 12 },
-  { name: "Minutes", icon: Clock, used: 3842, limit: 10000, unit: "min", trend: 8 },
-  { name: "Agents", icon: Bot, used: 5, limit: 10 },
-  { name: "Team Members", icon: Users, used: 4, limit: 10 },
-];
-
-const dailyUsage = [
-  { day: "Mon", calls: 45, minutes: 180 },
-  { day: "Tue", calls: 62, minutes: 248 },
-  { day: "Wed", calls: 58, minutes: 232 },
-  { day: "Thu", calls: 71, minutes: 284 },
-  { day: "Fri", calls: 89, minutes: 356 },
-  { day: "Sat", calls: 32, minutes: 128 },
-  { day: "Sun", calls: 28, minutes: 112 },
-];
-
-const plans: Plan[] = [
+// Static plans configuration
+const planDefinitions: Plan[] = [
   {
     id: "free",
     name: "Free",
@@ -210,7 +171,6 @@ const plans: Plan[] = [
     ],
     limits: { calls: 5000, minutes: 10000, agents: 10, team: 10 },
     popular: true,
-    current: true,
   },
   {
     id: "enterprise",
@@ -231,19 +191,6 @@ const plans: Plan[] = [
     ],
     limits: { calls: -1, minutes: -1, agents: -1, team: -1 },
   },
-];
-
-const invoices: Invoice[] = [
-  { id: "INV-2024-001", date: "2024-01-01", amount: 99, status: "paid", description: "Professional Plan - January 2024" },
-  { id: "INV-2023-012", date: "2023-12-01", amount: 99, status: "paid", description: "Professional Plan - December 2023" },
-  { id: "INV-2023-011", date: "2023-11-01", amount: 99, status: "paid", description: "Professional Plan - November 2023" },
-  { id: "INV-2023-010", date: "2023-10-01", amount: 29, status: "paid", description: "Starter Plan - October 2023" },
-  { id: "INV-2023-009", date: "2023-09-01", amount: 29, status: "paid", description: "Starter Plan - September 2023" },
-];
-
-const paymentMethods: PaymentMethod[] = [
-  { id: "pm-1", type: "card", brand: "visa", last4: "4242", expiryMonth: 12, expiryYear: 2025, isDefault: true },
-  { id: "pm-2", type: "card", brand: "mastercard", last4: "5555", expiryMonth: 8, expiryYear: 2026, isDefault: false },
 ];
 
 // Utility functions
@@ -557,12 +504,128 @@ export default function BillingPage() {
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
 
+  // Fetch current plan and usage from API
+  const { data: planData, isLoading: planLoading } = useQuery({
+    queryKey: ["billing", "plan"],
+    queryFn: () => billingApi.getCurrentPlan(),
+  });
+
+  // Fetch invoices from API
+  const { data: invoicesData, isLoading: invoicesLoading } = useQuery({
+    queryKey: ["billing", "invoices"],
+    queryFn: () => billingApi.getInvoices(),
+  });
+
+  // Fetch dashboard stats for additional usage data
+  const { data: dashboardData } = useQuery({
+    queryKey: ["analytics", "dashboard"],
+    queryFn: () => analytics.getDashboard(),
+  });
+
+  // Upgrade mutation
+  const upgradeMutation = useMutation({
+    mutationFn: (planId: string) => billingApi.createCheckoutSession(planId),
+    onSuccess: (data) => {
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        toast.success("Plan upgraded successfully");
+        setShowUpgradeDialog(false);
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to upgrade: ${error.message}`);
+    },
+  });
+
+  // Derive current plan from API or use default
+  const currentPlanId = planData?.plan || "professional";
+  const currentPlan: Plan = {
+    ...(planDefinitions.find((p) => p.id === currentPlanId) || planDefinitions[2]),
+    current: true,
+  };
+
+  // Build usage metrics from API data
+  const apiUsage = planData?.usage || dashboardData?.usage || {};
+  const usageMetrics: UsageMetric[] = [
+    {
+      name: "Calls",
+      icon: Phone,
+      used: apiUsage.calls_used || dashboardData?.today?.total_calls || 0,
+      limit: apiUsage.calls_limit || currentPlan.limits.calls,
+      trend: 12,
+    },
+    {
+      name: "Minutes",
+      icon: Clock,
+      used: apiUsage.minutes_used || dashboardData?.today?.total_minutes || 0,
+      limit: apiUsage.minutes_limit || currentPlan.limits.minutes,
+      unit: "min",
+      trend: 8,
+    },
+    {
+      name: "Agents",
+      icon: Bot,
+      used: dashboardData?.agents?.active || 0,
+      limit: currentPlan.limits.agents,
+    },
+    {
+      name: "Team Members",
+      icon: Users,
+      used: 4, // Would need team API
+      limit: currentPlan.limits.team,
+    },
+  ];
+
+  // Daily usage placeholder (would need time-series API)
+  const dailyUsage = [
+    { day: "Mon", calls: 45, minutes: 180 },
+    { day: "Tue", calls: 62, minutes: 248 },
+    { day: "Wed", calls: 58, minutes: 232 },
+    { day: "Thu", calls: 71, minutes: 284 },
+    { day: "Fri", calls: 89, minutes: 356 },
+    { day: "Sat", calls: 32, minutes: 128 },
+    { day: "Sun", calls: 28, minutes: 112 },
+  ];
+
+  // Transform invoices from API
+  const invoices: Invoice[] = (invoicesData || []).map((inv: any) => ({
+    id: inv.id,
+    date: inv.created_at,
+    amount: (inv.amount_cents || 0) / 100,
+    status: inv.status as Invoice["status"],
+    description: inv.description || `${currentPlan.name} Plan`,
+    downloadUrl: inv.pdf_url,
+  }));
+
+  // Payment methods placeholder (would need Stripe integration)
+  const paymentMethods: PaymentMethod[] = [];
+
+  // Mark plans with current
+  const plans = planDefinitions.map((p) => ({
+    ...p,
+    current: p.id === currentPlanId,
+  }));
+
   const totalSpentThisYear = invoices
-    .filter((inv) => inv.date.startsWith("2024"))
+    .filter((inv) => inv.date?.startsWith(new Date().getFullYear().toString()))
     .reduce((sum, inv) => sum + inv.amount, 0);
 
-  const nextBillingDate = "February 1, 2024";
+  const nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
   const nextBillingAmount = currentPlan.price || 0;
+
+  const handleUpgrade = () => {
+    if (selectedPlan && selectedPlan.price !== null) {
+      upgradeMutation.mutate(selectedPlan.id);
+    } else {
+      // Contact sales for enterprise
+      window.location.href = "mailto:sales@bvrai.com?subject=Enterprise Plan Inquiry";
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -945,8 +1008,8 @@ export default function BillingPage() {
             <Button variant="outline" onClick={() => setShowUpgradeDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={() => setShowUpgradeDialog(false)}>
-              Confirm Upgrade
+            <Button onClick={handleUpgrade} disabled={upgradeMutation.isPending}>
+              {upgradeMutation.isPending ? "Processing..." : "Confirm Upgrade"}
             </Button>
           </DialogFooter>
         </DialogContent>

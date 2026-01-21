@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
+import { organization as orgApi } from "@/lib/api";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -209,94 +212,17 @@ const defaultRoles: Role[] = [
   },
 ];
 
-// Mock data
-const mockTeamMembers: TeamMember[] = [
-  {
-    id: "1",
-    name: "John Smith",
-    email: "john@example.com",
-    role: "owner",
-    status: "active",
-    lastActive: "2024-01-14T10:30:00Z",
-    joinedAt: "2023-01-15T00:00:00Z",
-    twoFactorEnabled: true,
-  },
-  {
-    id: "2",
-    name: "Sarah Johnson",
-    email: "sarah@example.com",
-    role: "admin",
-    status: "active",
-    lastActive: "2024-01-14T09:15:00Z",
-    joinedAt: "2023-06-20T00:00:00Z",
-    twoFactorEnabled: true,
-  },
-  {
-    id: "3",
-    name: "Mike Brown",
-    email: "mike@example.com",
-    role: "member",
-    status: "active",
-    lastActive: "2024-01-13T16:45:00Z",
-    joinedAt: "2023-09-10T00:00:00Z",
-    twoFactorEnabled: false,
-  },
-  {
-    id: "4",
-    name: "Emily Davis",
-    email: "emily@example.com",
-    role: "viewer",
-    status: "active",
-    lastActive: "2024-01-12T11:00:00Z",
-    joinedAt: "2024-01-01T00:00:00Z",
-    twoFactorEnabled: false,
-  },
-  {
-    id: "5",
-    name: "Alex Wilson",
-    email: "alex@example.com",
-    role: "member",
-    status: "suspended",
-    lastActive: "2024-01-10T08:30:00Z",
-    joinedAt: "2023-11-15T00:00:00Z",
-    twoFactorEnabled: false,
-  },
-];
-
-const mockInvitations: Invitation[] = [
-  {
-    id: "inv-1",
-    email: "chris@example.com",
-    role: "member",
-    sentAt: "2024-01-13T10:00:00Z",
-    expiresAt: "2024-01-20T10:00:00Z",
-    status: "pending",
-  },
-  {
-    id: "inv-2",
-    email: "jessica@example.com",
-    role: "viewer",
-    sentAt: "2024-01-12T14:00:00Z",
-    expiresAt: "2024-01-19T14:00:00Z",
-    status: "pending",
-  },
-  {
-    id: "inv-3",
-    email: "old@example.com",
-    role: "member",
-    sentAt: "2024-01-01T10:00:00Z",
-    expiresAt: "2024-01-08T10:00:00Z",
-    status: "expired",
-  },
-];
-
-const mockActivityLogs: ActivityLog[] = [
-  { id: "1", user: "John Smith", action: "invited", target: "chris@example.com as Member", timestamp: "2024-01-13T10:00:00Z" },
-  { id: "2", user: "Sarah Johnson", action: "changed role", target: "Mike Brown from Viewer to Member", timestamp: "2024-01-12T15:30:00Z" },
-  { id: "3", user: "John Smith", action: "removed", target: "Tom Anderson", timestamp: "2024-01-11T09:00:00Z" },
-  { id: "4", user: "Sarah Johnson", action: "suspended", target: "Alex Wilson", timestamp: "2024-01-10T08:30:00Z" },
-  { id: "5", user: "John Smith", action: "invited", target: "jessica@example.com as Viewer", timestamp: "2024-01-12T14:00:00Z" },
-];
+// Transform API user to TeamMember format
+const transformMember = (user: any): TeamMember => ({
+  id: user.id,
+  name: user.name || user.email?.split("@")[0] || "Unknown",
+  email: user.email,
+  role: user.role || "member",
+  status: user.status || (user.is_active ? "active" : "suspended"),
+  lastActive: user.last_active_at || user.last_login_at || user.updated_at || new Date().toISOString(),
+  joinedAt: user.created_at || new Date().toISOString(),
+  twoFactorEnabled: user.two_factor_enabled || user.mfa_enabled || false,
+});
 
 // Utility functions
 const formatRelativeTime = (date: string): string => {
@@ -917,18 +843,77 @@ function RolePermissionsCard({ role, allPerms }: { role: Role; allPerms: Permiss
 }
 
 export default function TeamPage() {
-  const [members, setMembers] = useState<TeamMember[]>(mockTeamMembers);
-  const [invitations, setInvitations] = useState<Invitation[]>(mockInvitations);
+  const queryClient = useQueryClient();
   const [roles] = useState<Role[]>(defaultRoles);
-  const [activityLogs] = useState<ActivityLog[]>(mockActivityLogs);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [activeTab, setActiveTab] = useState("members");
-
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+
+  // Fetch team members from API
+  const { data: membersData, isLoading: membersLoading } = useQuery({
+    queryKey: ["organization", "members"],
+    queryFn: () => orgApi.getMembers(),
+  });
+
+  // Transform API data
+  const members: TeamMember[] = (membersData || []).map(transformMember);
+
+  // Invitations placeholder (would need separate API endpoint)
+  const [localInvitations, setLocalInvitations] = useState<Invitation[]>([]);
+  const invitations = localInvitations;
+
+  // Activity logs placeholder (would need separate API endpoint)
+  const activityLogs: ActivityLog[] = [];
+
+  // Mutations
+  const inviteMutation = useMutation({
+    mutationFn: ({ email, role }: { email: string; role: string }) =>
+      orgApi.inviteMember(email, role),
+    onSuccess: (_, { email, role }) => {
+      queryClient.invalidateQueries({ queryKey: ["organization", "members"] });
+      setLocalInvitations((prev) => [
+        {
+          id: `inv-${Date.now()}`,
+          email,
+          role,
+          sentAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          status: "pending",
+        },
+        ...prev,
+      ]);
+      toast.success(`Invitation sent to ${email}`);
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to invite member: ${error.message}`);
+    },
+  });
+
+  const updateRoleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      orgApi.updateMemberRole(userId, role),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["organization", "members"] });
+      toast.success("Role updated successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to update role: ${error.message}`);
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: (userId: string) => orgApi.removeMember(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["organization", "members"] });
+      toast.success("Member removed successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to remove member: ${error.message}`);
+    },
+  });
 
   // Filter members
   const filteredMembers = members.filter((member) => {
@@ -951,41 +936,31 @@ export default function TeamPage() {
 
   // Handlers
   const handleInvite = (email: string, role: string) => {
-    const newInvitation: Invitation = {
-      id: `inv-${Date.now()}`,
-      email,
-      role,
-      sentAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      status: "pending",
-    };
-    setInvitations((prev) => [newInvitation, ...prev]);
+    inviteMutation.mutate({ email, role });
   };
 
   const handleSaveMember = (memberId: string, role: string) => {
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, role } : m))
-    );
+    updateRoleMutation.mutate({ userId: memberId, role });
   };
 
   const handleRemoveMember = (memberId: string) => {
-    setMembers((prev) => prev.filter((m) => m.id !== memberId));
+    if (confirm("Are you sure you want to remove this member?")) {
+      removeMemberMutation.mutate(memberId);
+    }
   };
 
   const handleSuspendMember = (memberId: string) => {
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, status: "suspended" } : m))
-    );
+    // Would need API endpoint for suspend
+    toast.info("Suspend functionality requires additional API endpoint");
   };
 
   const handleReactivateMember = (memberId: string) => {
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, status: "active" } : m))
-    );
+    // Would need API endpoint for reactivate
+    toast.info("Reactivate functionality requires additional API endpoint");
   };
 
   const handleResendInvitation = (invitationId: string) => {
-    setInvitations((prev) =>
+    setLocalInvitations((prev) =>
       prev.map((inv) =>
         inv.id === invitationId
           ? {
@@ -997,10 +972,12 @@ export default function TeamPage() {
           : inv
       )
     );
+    toast.success("Invitation resent");
   };
 
   const handleCancelInvitation = (invitationId: string) => {
-    setInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+    setLocalInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+    toast.success("Invitation cancelled");
   };
 
   return (
