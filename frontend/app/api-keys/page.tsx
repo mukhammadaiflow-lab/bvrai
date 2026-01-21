@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Key,
   Plus,
@@ -12,56 +13,15 @@ import {
   Shield,
   AlertTriangle,
   Check,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatRelativeTime } from "@/lib/utils";
-
-// Mock API keys data
-const mockApiKeys = [
-  {
-    id: "1",
-    name: "Production API Key",
-    keyPrefix: "sk_live_xxxxxxxxxxxxx",
-    scopes: ["agents:read", "agents:write", "calls:read", "calls:write", "analytics:read"],
-    createdAt: "2024-01-01T00:00:00Z",
-    lastUsed: "2024-01-14T10:30:00Z",
-    expiresAt: null,
-    isActive: true,
-  },
-  {
-    id: "2",
-    name: "Development Key",
-    keyPrefix: "sk_test_xxxxxxxxxxxxx",
-    scopes: ["agents:read", "agents:write", "calls:read"],
-    createdAt: "2024-01-10T00:00:00Z",
-    lastUsed: "2024-01-14T09:15:00Z",
-    expiresAt: null,
-    isActive: true,
-  },
-  {
-    id: "3",
-    name: "Analytics Service",
-    keyPrefix: "sk_live_yyyyyyyyyyyy",
-    scopes: ["analytics:read"],
-    createdAt: "2024-01-05T00:00:00Z",
-    lastUsed: "2024-01-14T08:00:00Z",
-    expiresAt: "2024-06-01T00:00:00Z",
-    isActive: true,
-  },
-  {
-    id: "4",
-    name: "Old Integration (Deprecated)",
-    keyPrefix: "sk_live_zzzzzzzzzzzz",
-    scopes: ["agents:read"],
-    createdAt: "2023-12-01T00:00:00Z",
-    lastUsed: "2024-01-01T00:00:00Z",
-    expiresAt: null,
-    isActive: false,
-  },
-];
+import { apiKeys } from "@/lib/api";
+import { toast } from "sonner";
 
 const availableScopes = [
   { id: "agents:read", label: "Read Agents", description: "View agent configurations" },
@@ -77,12 +37,49 @@ const availableScopes = [
 export default function ApiKeysPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // Fetch API keys from real API
+  const { data: apiKeysList, isLoading, error } = useQuery({
+    queryKey: ["api-keys"],
+    queryFn: () => apiKeys.list(),
+  });
+
+  // Revoke API key mutation
+  const revokeMutation = useMutation({
+    mutationFn: (keyId: string) => apiKeys.revoke(keyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+      toast.success("API key revoked successfully");
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to revoke API key: ${error.message}`);
+    },
+  });
 
   const handleCopyKey = (keyPrefix: string) => {
     navigator.clipboard.writeText(keyPrefix);
     setCopiedKey(keyPrefix);
     setTimeout(() => setCopiedKey(null), 2000);
   };
+
+  const handleRevoke = (keyId: string) => {
+    if (confirm("Are you sure you want to revoke this API key? This action cannot be undone.")) {
+      revokeMutation.mutate(keyId);
+    }
+  };
+
+  // Transform API data to component format
+  const keysData = (apiKeysList || []).map((key: any) => ({
+    id: key.id,
+    name: key.name,
+    keyPrefix: key.key_prefix || key.prefix || `sk_...${key.id.slice(-8)}`,
+    scopes: key.scopes || [],
+    createdAt: key.created_at,
+    lastUsed: key.last_used_at || key.last_used,
+    expiresAt: key.expires_at,
+    isActive: key.is_active ?? key.status !== "revoked",
+  }));
 
   return (
     <div className="space-y-6">
@@ -117,7 +114,31 @@ export default function ApiKeysPage() {
 
       {/* API Keys List */}
       <div className="space-y-4">
-        {mockApiKeys.map((apiKey) => (
+        {isLoading ? (
+          <Card>
+            <CardContent className="flex items-center justify-center p-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </CardContent>
+          </Card>
+        ) : error ? (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="p-4 text-red-800">
+              Failed to load API keys. Please try again.
+            </CardContent>
+          </Card>
+        ) : keysData.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center p-12 text-center">
+              <Key className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="font-semibold mb-2">No API Keys</h3>
+              <p className="text-muted-foreground mb-4">Create your first API key to start using the API.</p>
+              <Button onClick={() => setShowCreateModal(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create API Key
+              </Button>
+            </CardContent>
+          </Card>
+        ) : keysData.map((apiKey: any) => (
           <Card key={apiKey.id} className={cn(!apiKey.isActive && "opacity-60")}>
             <CardContent className="p-6">
               <div className="flex items-start justify-between">
@@ -172,8 +193,17 @@ export default function ApiKeysPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {apiKey.isActive && (
-                    <Button variant="destructive" size="sm">
-                      <Trash2 className="mr-1 h-4 w-4" />
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleRevoke(apiKey.id)}
+                      disabled={revokeMutation.isPending}
+                    >
+                      {revokeMutation.isPending ? (
+                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="mr-1 h-4 w-4" />
+                      )}
                       Revoke
                     </Button>
                   )}

@@ -76,14 +76,25 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS middleware - use shared secure configuration
+try:
+    from bvrai_core.security.cors import get_cors_middleware_config
+    app.add_middleware(CORSMiddleware, **get_cors_middleware_config())
+except ImportError:
+    import os
+    env = os.getenv("ENVIRONMENT", "development")
+    origins = (
+        ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"]
+        if env == "development"
+        else os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") or ["https://app.bvrai.com"]
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    )
 
 
 # =============================================================================
