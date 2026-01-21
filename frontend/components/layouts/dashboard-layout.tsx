@@ -27,7 +27,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background gradient-mesh">
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -40,40 +40,42 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         )}
       >
         {/* Header */}
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-6 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border/50 bg-background/80 px-6 backdrop-blur-xl">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
+            <h1 className="text-xl font-semibold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">{getPageTitle()}</h1>
           </div>
 
           <div className="flex items-center gap-4">
             {/* Search */}
             <div className="hidden md:block">
-              <Input
-                placeholder="Search..."
-                className="w-64"
-                leftIcon={<Search className="h-4 w-4" />}
-              />
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search anything..."
+                  className="w-72 pl-9 rounded-xl border-border/50 bg-muted/50 focus:bg-background transition-colors"
+                />
+              </div>
             </div>
 
             {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
+            <Button variant="ghost" size="icon" className="relative rounded-xl hover:bg-primary/10">
               <Bell className="h-5 w-5" />
-              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] text-destructive-foreground">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-gradient-to-r from-primary to-accent text-[10px] font-bold text-white">
                 3
               </span>
             </Button>
 
             {/* User Menu */}
-            <Button variant="ghost" size="icon" className="rounded-full">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                <User className="h-4 w-4 text-primary-foreground" />
+            <Button variant="ghost" size="icon" className="rounded-xl p-0.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
+                <User className="h-4 w-4 text-white" />
               </div>
             </Button>
           </div>
         </header>
 
         {/* Main Content */}
-        <main className="p-6">{children}</main>
+        <main className="p-6 md:p-8">{children}</main>
       </div>
     </div>
   );
