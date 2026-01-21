@@ -182,7 +182,7 @@ export default function ApiKeysPage() {
                       </Button>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {apiKey.scopes.map((scope) => (
+                      {apiKey.scopes.map((scope: string) => (
                         <Badge key={scope} variant="outline" className="text-xs">
                           <Shield className="mr-1 h-3 w-3" />
                           {scope}
