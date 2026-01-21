@@ -5,6 +5,7 @@ Provides endpoints for managing agents, calls, knowledge bases, and analytics.
 """
 
 from contextlib import asynccontextmanager
+import os
 
 import structlog
 from fastapi import FastAPI, Request, status
@@ -14,6 +15,14 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.database.session import init_db, close_db
+
+# Import rate limiting middleware
+try:
+    from bvrai_core.middleware import RateLimitMiddleware, close_limiter
+    RATE_LIMITING_AVAILABLE = True
+except ImportError:
+    RATE_LIMITING_AVAILABLE = False
+    close_limiter = None
 
 # Import routers
 from app.agents.routes import router as agents_router
@@ -50,6 +59,7 @@ async def lifespan(app: FastAPI):
         "Starting Platform API",
         host=settings.host,
         port=settings.port,
+        rate_limiting=RATE_LIMITING_AVAILABLE,
     )
 
     # Initialize database
@@ -61,6 +71,11 @@ async def lifespan(app: FastAPI):
     # Cleanup
     logger.info("Shutting down Platform API")
     await close_db()
+
+    # Close rate limiter
+    if close_limiter:
+        await close_limiter()
+        logger.info("Rate limiter closed")
 
 
 # Create FastAPI application
@@ -133,6 +148,26 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-RateLimit-Remaining"],
     max_age=600,  # Cache preflight for 10 minutes
 )
+
+# Rate limiting middleware (Redis-backed with local fallback)
+if RATE_LIMITING_AVAILABLE:
+    # Production: Configure based on environment
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env in ("production", "prod"):
+        # Stricter limits in production
+        app.add_middleware(
+            RateLimitMiddleware,
+            requests_per_minute=100,
+            requests_per_hour=2000,
+        )
+    else:
+        # More permissive in development
+        app.add_middleware(
+            RateLimitMiddleware,
+            requests_per_minute=300,
+            requests_per_hour=10000,
+        )
+    logger.info("Rate limiting middleware enabled")
 
 
 # Global exception handler
