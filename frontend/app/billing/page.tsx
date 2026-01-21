@@ -120,6 +120,19 @@ interface PaymentMethod {
   isDefault: boolean;
 }
 
+interface DailyUsageData {
+  day: string;
+  calls: number;
+  minutes: number;
+}
+
+interface ApiUsage {
+  calls_used?: number;
+  calls_limit?: number;
+  minutes_used?: number;
+  minutes_limit?: number;
+}
+
 // Static plans configuration
 const planDefinitions: Plan[] = [
   {
@@ -269,8 +282,8 @@ function UsageCard({ metric }: { metric: UsageMetric }) {
   );
 }
 
-function UsageChart() {
-  const maxCalls = Math.max(...dailyUsage.map((d) => d.calls));
+function UsageChart({ dailyUsage }: { dailyUsage: DailyUsageData[] }) {
+  const maxCalls = Math.max(...dailyUsage.map((d: DailyUsageData) => d.calls));
 
   return (
     <Card>
@@ -294,7 +307,7 @@ function UsageChart() {
       </CardHeader>
       <CardContent>
         <div className="flex items-end gap-2 h-40">
-          {dailyUsage.map((day, index) => (
+          {dailyUsage.map((day: DailyUsageData, index: number) => (
             <div key={day.day} className="flex-1 flex flex-col items-center gap-1">
               <TooltipProvider>
                 <Tooltip>
@@ -546,7 +559,7 @@ export default function BillingPage() {
   };
 
   // Build usage metrics from API data
-  const apiUsage = planData?.usage || dashboardData?.usage || {};
+  const apiUsage: ApiUsage = (planData?.usage || dashboardData?.usage || {}) as ApiUsage;
   const usageMetrics: UsageMetric[] = [
     {
       name: "Calls",
@@ -748,7 +761,7 @@ export default function BillingPage() {
 
             {/* Usage Chart */}
             <div className="grid gap-4 lg:grid-cols-2">
-              <UsageChart />
+              <UsageChart dailyUsage={dailyUsage} />
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Cost Breakdown</CardTitle>

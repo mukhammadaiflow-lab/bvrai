@@ -967,10 +967,12 @@ export default function WebhooksPage() {
   // Fetch delivery logs for selected webhook
   const { data: deliveriesData } = useQuery({
     queryKey: ["webhooks", "deliveries", selectedWebhookForLogs],
-    queryFn: () =>
-      selectedWebhookForLogs !== "all"
-        ? webhooksApi.getDeliveries(selectedWebhookForLogs)
-        : Promise.resolve({ items: [] }),
+    queryFn: async () => {
+      if (selectedWebhookForLogs !== "all") {
+        return webhooksApi.getDeliveries(selectedWebhookForLogs);
+      }
+      return { items: [], total: 0, page: 1, page_size: 20, total_pages: 0 };
+    },
     enabled: selectedWebhookForLogs !== "all",
   });
 
@@ -980,12 +982,12 @@ export default function WebhooksPage() {
       webhooksApi.create({
         name: data.name,
         url: data.url,
-        events: data.events,
+        events: data.events as any,
         secret: data.secret,
         headers: data.headers,
         max_retries: data.retryPolicy?.maxRetries,
         retry_delay_ms: data.retryPolicy?.retryDelay,
-      }),
+      } as any),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["webhooks"] });
       toast.success("Webhook created successfully");
@@ -1002,12 +1004,12 @@ export default function WebhooksPage() {
       webhooksApi.update(id, {
         name: data.name,
         url: data.url,
-        events: data.events,
+        events: data.events as any,
         secret: data.secret,
         headers: data.headers,
         max_retries: data.retryPolicy?.maxRetries,
         retry_delay_ms: data.retryPolicy?.retryDelay,
-      }),
+      } as any),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["webhooks"] });
       toast.success("Webhook updated successfully");
