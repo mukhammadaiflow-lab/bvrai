@@ -163,11 +163,13 @@ export default function AgentsPage() {
             className="max-w-md"
           />
         </div>
-        <div className="flex gap-2">
+        {/* Status filter buttons - scrollable on mobile, wrapped on tablet+ */}
+        <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 md:flex-wrap scrollbar-hide">
           <Button
             variant={statusFilter === null ? "default" : "outline"}
             size="sm"
             onClick={() => setStatusFilter(null)}
+            className="whitespace-nowrap shrink-0"
           >
             All ({statusCounts.all})
           </Button>
@@ -175,6 +177,7 @@ export default function AgentsPage() {
             variant={statusFilter === "active" ? "default" : "outline"}
             size="sm"
             onClick={() => setStatusFilter("active")}
+            className="whitespace-nowrap shrink-0"
           >
             Active ({statusCounts.active})
           </Button>
@@ -182,6 +185,7 @@ export default function AgentsPage() {
             variant={statusFilter === "paused" ? "default" : "outline"}
             size="sm"
             onClick={() => setStatusFilter("paused")}
+            className="whitespace-nowrap shrink-0"
           >
             Paused ({statusCounts.paused})
           </Button>
@@ -189,6 +193,7 @@ export default function AgentsPage() {
             variant={statusFilter === "draft" ? "default" : "outline"}
             size="sm"
             onClick={() => setStatusFilter("draft")}
+            className="whitespace-nowrap shrink-0"
           >
             Draft ({statusCounts.draft})
           </Button>

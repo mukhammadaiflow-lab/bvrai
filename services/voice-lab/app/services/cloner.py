@@ -398,8 +398,49 @@ class PlayHTCloner(BaseVoiceCloner):
         style: Optional[VoiceStyleSettings] = None,
     ) -> bytes:
         """Synthesize speech with PlayHT."""
-        # Implement PlayHT TTS
-        raise NotImplementedError()
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+
+        style = style or VoiceStyleSettings()
+
+        # PlayHT v2 TTS endpoint
+        payload = {
+            "text": text,
+            "voice": voice_id,
+            "quality": "high",
+            "output_format": "mp3",
+            "speed": style.speed if style else 1.0,
+            "sample_rate": 24000,
+        }
+
+        response = await self._client.post(
+            f"{self.BASE_URL}/tts",
+            headers=self.headers,
+            json=payload,
+        )
+
+        if response.status_code == 200:
+            return response.content
+        elif response.status_code == 201:
+            # PlayHT returns job ID, need to poll
+            result = response.json()
+            job_url = result.get("url") or result.get("_links", {}).get("self")
+
+            # Poll for completion
+            for _ in range(60):  # 60 second timeout
+                await asyncio.sleep(1)
+                poll_response = await self._client.get(job_url, headers=self.headers)
+                if poll_response.status_code == 200:
+                    poll_data = poll_response.json()
+                    if poll_data.get("status") == "complete":
+                        audio_url = poll_data.get("output", {}).get("url") or poll_data.get("audioUrl")
+                        if audio_url:
+                            audio_response = await self._client.get(audio_url)
+                            return audio_response.content
+                        break
+            raise Exception("PlayHT TTS job timed out")
+        else:
+            raise Exception(f"PlayHT TTS error: {response.status_code}")
 
     async def synthesize_stream(
         self,
@@ -408,10 +449,48 @@ class PlayHTCloner(BaseVoiceCloner):
         style: Optional[VoiceStyleSettings] = None,
     ) -> AsyncIterator[bytes]:
         """Stream synthesized speech from PlayHT."""
-        raise NotImplementedError()
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+
+        style = style or VoiceStyleSettings()
+
+        payload = {
+            "text": text,
+            "voice": voice_id,
+            "quality": "draft",  # Faster for streaming
+            "output_format": "mp3",
+            "speed": style.speed if style else 1.0,
+        }
+
+        async with self._client.stream(
+            "POST",
+            f"{self.BASE_URL}/tts/stream",
+            headers=self.headers,
+            json=payload,
+        ) as response:
+            if response.status_code == 200:
+                async for chunk in response.aiter_bytes(chunk_size=1024):
+                    yield chunk
+            else:
+                raise Exception(f"PlayHT stream error: {response.status_code}")
 
     async def get_voice_info(self, voice_id: str) -> Dict[str, Any]:
         """Get voice info from PlayHT."""
+        if not self._client:
+            return {}
+
+        try:
+            response = await self._client.get(
+                f"{self.BASE_URL}/cloned-voices",
+                headers=self.headers,
+            )
+            if response.status_code == 200:
+                voices = response.json()
+                for voice in voices:
+                    if voice.get("id") == voice_id:
+                        return voice
+        except Exception as e:
+            logger.error(f"PlayHT get voice error: {e}")
         return {}
 
 
@@ -423,10 +502,23 @@ class CartesiaCloner(BaseVoiceCloner):
     - Ultra-low latency (40-95ms)
     - Voice cloning from audio
     - Emotion control
+    - WebSocket streaming support
     """
 
     provider = VoiceProvider.CARTESIA
     BASE_URL = "https://api.cartesia.ai"
+
+    def __init__(self, api_key: str, model_id: str = "sonic-english", **kwargs):
+        super().__init__(api_key, **kwargs)
+        self.model_id = model_id
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        return {
+            "X-API-Key": self.api_key,
+            "Cartesia-Version": "2024-06-10",
+            "Content-Type": "application/json",
+        }
 
     async def clone_voice(
         self,
@@ -435,19 +527,58 @@ class CartesiaCloner(BaseVoiceCloner):
         description: Optional[str] = None,
         labels: Optional[Dict[str, str]] = None,
     ) -> CloneResult:
-        """Clone voice using Cartesia."""
-        # Cartesia implementation
+        """Clone voice using Cartesia's voice embedding API."""
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+
         start_time = time.time()
 
         try:
-            # Cartesia voice cloning API
-            # Implementation depends on their specific API
-            return CloneResult(
-                success=False,
-                error_message="Cartesia cloning not yet implemented",
-                processing_time_s=time.time() - start_time,
+            # Cartesia uses voice embeddings extracted from audio
+            # First, extract embedding from audio sample
+            import base64
+
+            # Encode audio to base64
+            audio_b64 = base64.b64encode(audio_files[0]).decode("utf-8")
+
+            # Create voice clone request
+            payload = {
+                "name": name,
+                "description": description or f"Cloned voice: {name}",
+                "embedding": {
+                    "mode": "audio",
+                    "audio": {
+                        "data": audio_b64,
+                        "format": "wav",
+                    },
+                },
+                "language": "en",
+            }
+
+            response = await self._client.post(
+                f"{self.BASE_URL}/voices/clone",
+                headers=self.headers,
+                json=payload,
             )
+
+            if response.status_code in (200, 201):
+                result = response.json()
+                return CloneResult(
+                    success=True,
+                    provider_voice_id=result.get("id"),
+                    processing_time_s=time.time() - start_time,
+                    provider_metadata=result,
+                )
+            else:
+                error_detail = response.json() if response.content else {"status": response.status_code}
+                return CloneResult(
+                    success=False,
+                    error_message=f"Cartesia API error: {error_detail}",
+                    processing_time_s=time.time() - start_time,
+                )
+
         except Exception as e:
+            logger.error(f"Cartesia clone error: {e}")
             return CloneResult(
                 success=False,
                 error_message=str(e),
@@ -455,7 +586,19 @@ class CartesiaCloner(BaseVoiceCloner):
             )
 
     async def delete_voice(self, voice_id: str) -> bool:
-        return False
+        """Delete a voice from Cartesia."""
+        if not self._client:
+            return False
+
+        try:
+            response = await self._client.delete(
+                f"{self.BASE_URL}/voices/{voice_id}",
+                headers=self.headers,
+            )
+            return response.status_code in (200, 204)
+        except Exception as e:
+            logger.error(f"Cartesia delete error: {e}")
+            return False
 
     async def synthesize(
         self,
@@ -463,7 +606,43 @@ class CartesiaCloner(BaseVoiceCloner):
         text: str,
         style: Optional[VoiceStyleSettings] = None,
     ) -> bytes:
-        raise NotImplementedError()
+        """Synthesize speech with Cartesia (ultra-low latency)."""
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+
+        style = style or VoiceStyleSettings()
+
+        # Cartesia TTS request
+        payload = {
+            "model_id": self.model_id,
+            "transcript": text,
+            "voice": {
+                "mode": "id",
+                "id": voice_id,
+            },
+            "output_format": {
+                "container": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": 24000,
+            },
+        }
+
+        # Add emotion/style controls if supported
+        if style.expressiveness != 0.5:
+            payload["voice"]["__experimental_controls"] = {
+                "emotion": ["neutral:high"] if style.expressiveness < 0.3 else ["happy:medium"],
+            }
+
+        response = await self._client.post(
+            f"{self.BASE_URL}/tts/bytes",
+            headers=self.headers,
+            json=payload,
+        )
+
+        if response.status_code == 200:
+            return response.content
+        else:
+            raise Exception(f"Cartesia TTS error: {response.status_code}")
 
     async def synthesize_stream(
         self,
@@ -471,11 +650,77 @@ class CartesiaCloner(BaseVoiceCloner):
         text: str,
         style: Optional[VoiceStyleSettings] = None,
     ) -> AsyncIterator[bytes]:
-        raise NotImplementedError()
-        yield b""
+        """Stream synthesized speech from Cartesia with ultra-low latency."""
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+
+        style = style or VoiceStyleSettings()
+
+        payload = {
+            "model_id": self.model_id,
+            "transcript": text,
+            "voice": {
+                "mode": "id",
+                "id": voice_id,
+            },
+            "output_format": {
+                "container": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": 24000,
+            },
+        }
+
+        # Use server-sent events for streaming
+        async with self._client.stream(
+            "POST",
+            f"{self.BASE_URL}/tts/sse",
+            headers=self.headers,
+            json=payload,
+        ) as response:
+            if response.status_code == 200:
+                import base64
+                async for line in response.aiter_lines():
+                    if line.startswith("data:"):
+                        try:
+                            import json
+                            data = json.loads(line[5:])
+                            if "audio" in data:
+                                audio_chunk = base64.b64decode(data["audio"])
+                                yield audio_chunk
+                        except Exception:
+                            continue
+            else:
+                raise Exception(f"Cartesia stream error: {response.status_code}")
 
     async def get_voice_info(self, voice_id: str) -> Dict[str, Any]:
+        """Get voice info from Cartesia."""
+        if not self._client:
+            return {}
+
+        try:
+            response = await self._client.get(
+                f"{self.BASE_URL}/voices/{voice_id}",
+                headers=self.headers,
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.error(f"Cartesia get voice error: {e}")
         return {}
+
+    async def health_check(self) -> bool:
+        """Check if Cartesia is available."""
+        if not self._client:
+            return False
+
+        try:
+            response = await self._client.get(
+                f"{self.BASE_URL}/voices",
+                headers=self.headers,
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
 
 
 # =============================================================================

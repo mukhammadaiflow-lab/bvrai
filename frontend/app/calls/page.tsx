@@ -153,12 +153,12 @@ export default function CallsPage() {
             View and analyze all voice agent calls
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline">
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" className="whitespace-nowrap">
             <Download className="mr-2 h-4 w-4" />
             Export
           </Button>
-          <Button asChild>
+          <Button asChild className="whitespace-nowrap">
             <Link href="/calls/new">
               <Phone className="mr-2 h-4 w-4" />
               New Call
