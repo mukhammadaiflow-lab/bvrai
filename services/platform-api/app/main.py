@@ -86,13 +86,52 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS middleware
+# CORS middleware - Configure based on environment
+def get_cors_origins() -> list[str]:
+    """Get allowed CORS origins based on environment."""
+    import os
+
+    env = os.getenv("ENVIRONMENT", "development").lower()
+
+    if env in ("production", "prod"):
+        # Production: Only allow specific origins from environment
+        allowed = os.getenv("CORS_ALLOWED_ORIGINS", "")
+        if allowed:
+            return [origin.strip() for origin in allowed.split(",")]
+        # Fallback to same-origin only
+        return ["https://app.bvrai.com", "https://api.bvrai.com"]
+
+    if env == "staging":
+        return [
+            "https://staging.bvrai.com",
+            "https://staging-api.bvrai.com",
+            "http://localhost:3000",
+        ]
+
+    # Development: Allow localhost variants
+    return [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",  # Vite
+        "http://localhost:8080",
+    ]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-API-Key",
+        "X-Request-ID",
+        "X-Tenant-ID",
+    ],
+    expose_headers=["X-Request-ID", "X-RateLimit-Remaining"],
+    max_age=600,  # Cache preflight for 10 minutes
 )
 
 

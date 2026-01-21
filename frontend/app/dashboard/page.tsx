@@ -34,23 +34,28 @@ import {
 import { cn, formatDuration, formatNumber } from "@/lib/utils";
 import { analytics, calls, agents as agentsApi } from "@/lib/api";
 
-// Generate mock chart data for the last 7 days
+// Generate chart data for the last 7 days from API data
 function generateChartData(baseData: any) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const today = new Date().getDay();
 
+  // Use API data if available, otherwise show empty state
+  const dailyData = baseData?.daily_breakdown || [];
+
   return days.map((day, index) => {
     const isToday = index === (today === 0 ? 6 : today - 1);
-    const baseCalls = baseData?.week?.total_calls ? Math.floor(baseData.week.total_calls / 7) : 0;
-    const variance = Math.random() * 0.4 - 0.2;
-    const callCount = Math.max(0, Math.floor(baseCalls * (1 + variance)));
-    const successRate = 0.85 + Math.random() * 0.1;
+    // Find matching day from API data
+    const dayData = dailyData.find((d: any) => d.day === day);
+
+    const callCount = dayData?.calls ?? (isToday ? (baseData?.today?.total_calls || 0) : 0);
+    const minutes = dayData?.minutes ?? 0;
+    const successRate = baseData?.today?.success_rate || 0.85;
 
     return {
       date: day,
       label: day,
-      calls: isToday ? baseData?.today?.total_calls || callCount : callCount,
-      minutes: Math.floor(callCount * (2 + Math.random() * 3)),
+      calls: callCount,
+      minutes: minutes,
       success: Math.floor(callCount * successRate),
       failed: Math.floor(callCount * (1 - successRate)),
     };
@@ -119,16 +124,16 @@ export default function DashboardPage() {
   const topAgents = agentsData?.items?.slice(0, 6) || [];
   const chartData = generateChartData(stats);
 
-  // Transform agents to performance format
+  // Transform agents to performance format using real stats
   const agentPerformance = topAgents.map((agent: any) => ({
     id: agent.id,
     name: agent.name,
-    is_active: agent.is_active,
-    total_calls: agent.total_calls || Math.floor(Math.random() * 500),
-    successful_calls: Math.floor((agent.total_calls || 100) * 0.9),
-    average_duration: Math.floor(Math.random() * 300) + 60,
-    success_rate: 85 + Math.random() * 10,
-    trend: Math.floor(Math.random() * 20) - 5,
+    is_active: agent.is_active ?? agent.status === "active",
+    total_calls: agent.total_calls ?? agent.statistics?.total_calls ?? 0,
+    successful_calls: agent.successful_calls ?? agent.statistics?.successful_calls ?? 0,
+    average_duration: agent.average_duration ?? agent.statistics?.avg_duration ?? 0,
+    success_rate: agent.success_rate ?? agent.statistics?.success_rate ?? 0,
+    trend: agent.trend ?? agent.statistics?.trend ?? 0,
   }));
 
   // Determine if user is new (for getting started section)
