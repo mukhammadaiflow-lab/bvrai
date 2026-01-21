@@ -91,30 +91,33 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r bg-card transition-all duration-300",
+        "fixed left-0 top-0 z-40 h-screen border-r border-border/50 bg-sidebar-background/95 backdrop-blur-xl transition-all duration-300",
         collapsed ? "w-16" : "w-64"
       )}
     >
       {/* Logo */}
-      <div className="flex h-16 items-center justify-between border-b px-4">
+      <div className="flex h-16 items-center justify-between border-b border-border/50 px-4">
         {!collapsed && (
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Bot className="h-5 w-5 text-primary-foreground" />
+          <Link href="/dashboard" className="flex items-center gap-3 group">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent shadow-lg shadow-primary/25 group-hover:shadow-primary/40 transition-shadow">
+              <Bot className="h-5 w-5 text-white" />
             </div>
-            <span className="font-bold text-lg">Builder AI</span>
+            <div className="flex flex-col">
+              <span className="font-bold text-lg bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">BVRAI</span>
+              <span className="text-[10px] text-muted-foreground -mt-0.5">Voice AI Platform</span>
+            </div>
           </Link>
         )}
         {collapsed && (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary mx-auto">
-            <Bot className="h-5 w-5 text-primary-foreground" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent mx-auto shadow-lg shadow-primary/25">
+            <Bot className="h-5 w-5 text-white" />
           </div>
         )}
         <Button
           variant="ghost"
           size="icon-sm"
           onClick={onToggle}
-          className={cn(collapsed && "mx-auto")}
+          className={cn("rounded-lg hover:bg-primary/10", collapsed && "mx-auto mt-2")}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />
@@ -125,15 +128,15 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col gap-2 p-4 h-[calc(100vh-8rem)] overflow-y-auto scrollbar-hide">
+      <nav className="flex flex-col gap-1 p-3 h-[calc(100vh-8rem)] overflow-y-auto scrollbar-thin">
         {navGroups.map((group) => (
-          <div key={group.title} className="mb-2">
+          <div key={group.title} className="mb-3">
             {!collapsed && (
-              <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                 {group.title}
               </p>
             )}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {group.items.map((item) => {
                 const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
                 return (
@@ -141,20 +144,28 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                      "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
                       isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        ? "bg-gradient-to-r from-primary/15 to-accent/10 text-primary"
+                        : "text-muted-foreground hover:text-foreground hover:bg-primary/5",
                       collapsed && "justify-center px-2"
                     )}
                     title={collapsed ? item.title : undefined}
                   >
-                    {item.icon}
+                    {isActive && (
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-gradient-to-b from-primary to-accent" />
+                    )}
+                    <span className={cn(isActive && "text-primary")}>{item.icon}</span>
                     {!collapsed && (
                       <>
                         <span className="flex-1">{item.title}</span>
                         {item.badge && (
-                          <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs">
+                          <span className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            typeof item.badge === "number"
+                              ? "bg-gradient-to-r from-primary to-accent text-white min-w-[20px] text-center"
+                              : "bg-accent/20 text-accent"
+                          )}>
                             {item.badge}
                           </span>
                         )}
@@ -169,26 +180,26 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
       </nav>
 
       {/* Footer */}
-      <div className="absolute bottom-0 left-0 right-0 border-t bg-card p-4">
-        <div className={cn("flex gap-2", collapsed ? "flex-col items-center" : "")}>
+      <div className="absolute bottom-0 left-0 right-0 border-t border-border/50 bg-sidebar-background/80 backdrop-blur-sm p-3">
+        <div className={cn("flex gap-1", collapsed ? "flex-col items-center" : "")}>
           <Button
             variant="ghost"
             size={collapsed ? "icon-sm" : "sm"}
-            className={cn(!collapsed && "flex-1 justify-start")}
+            className={cn("rounded-xl hover:bg-primary/10", !collapsed && "flex-1 justify-start")}
             asChild
           >
             <Link href="/help">
               <HelpCircle className="h-4 w-4" />
-              {!collapsed && <span className="ml-2">Help</span>}
+              {!collapsed && <span className="ml-2">Help & Support</span>}
             </Link>
           </Button>
           <Button
             variant="ghost"
             size={collapsed ? "icon-sm" : "sm"}
-            className={cn(!collapsed && "flex-1 justify-start text-destructive hover:text-destructive")}
+            className={cn("rounded-xl hover:bg-destructive/10 hover:text-destructive", !collapsed && "flex-1 justify-start")}
           >
             <LogOut className="h-4 w-4" />
-            {!collapsed && <span className="ml-2">Logout</span>}
+            {!collapsed && <span className="ml-2">Sign Out</span>}
           </Button>
         </div>
       </div>
