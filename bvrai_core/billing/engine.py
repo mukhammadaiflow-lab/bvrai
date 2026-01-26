@@ -192,6 +192,22 @@ class BillingEngine:
             )
             self._payment_processor: PaymentProcessor = StripePaymentProcessor(stripe_config)
         else:
+            # Production safeguard: require payment processor in production
+            import os
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if env in ("production", "prod"):
+                logger.error(
+                    "STRIPE_API_KEY not configured in production. "
+                    "Set STRIPE_API_KEY environment variable for payment processing."
+                )
+                raise ValueError(
+                    "Payment processor not configured. "
+                    "Set STRIPE_API_KEY environment variable for production."
+                )
+            logger.warning(
+                "Using MockPaymentProcessor - payments will be simulated. "
+                "Set STRIPE_API_KEY for real payment processing."
+            )
             self._payment_processor = MockPaymentProcessor()
 
         self._webhook_handler = WebhookHandler()

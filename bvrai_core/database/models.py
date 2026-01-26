@@ -324,7 +324,11 @@ class VoiceConfigurationModel(Base, TimestampMixin):
         nullable=False,
         unique=True,
     )
-    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    organization_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -375,7 +379,11 @@ class Conversation(Base, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "conversations"
 
-    organization_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    organization_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     agent_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("agents.id", ondelete="SET NULL"),
@@ -446,8 +454,8 @@ class Message(Base, TimestampMixin, SoftDeleteMixin):
 
     conversation_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("conversations.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
     )
 
     # Message content

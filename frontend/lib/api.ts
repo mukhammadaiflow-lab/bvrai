@@ -29,7 +29,11 @@ import type {
 } from "@/types";
 
 // API Configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8086/api/v1";
+// Use proxy route for secure cookie-based auth, or direct backend URL
+const USE_PROXY = process.env.NEXT_PUBLIC_USE_API_PROXY !== 'false';
+const DIRECT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8086/api/v1";
+const PROXY_API_URL = "/api/proxy";
+const API_BASE_URL = USE_PROXY ? PROXY_API_URL : DIRECT_API_URL;
 
 // Error class for API errors
 export class APIError extends Error {
@@ -54,14 +58,19 @@ const createAPIClient = (): AxiosInstance => {
     headers: {
       "Content-Type": "application/json",
     },
+    withCredentials: true, // Include cookies for proxy auth
   });
 
-  // Request interceptor - add auth token
+  // Request interceptor - add auth token (only for direct API calls)
   client.interceptors.request.use(
     (config) => {
-      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      // When using proxy, cookies are handled by the proxy route
+      // When using direct API, use localStorage token (backward compatibility)
+      if (!USE_PROXY) {
+        const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
       }
       return config;
     },
@@ -96,34 +105,68 @@ const api = createAPIClient();
 
 // ============================================================================
 // Authentication
+// Uses Next.js API routes for secure httpOnly cookie-based auth
 // ============================================================================
 
 export const auth = {
   async login(email: string, password: string): Promise<{ access_token: string; token: string; user: User }> {
-    const { data } = await api.post("/auth/login", { email, password });
-    return { ...data, access_token: data.token };
+    // Use Next.js API route for secure cookie handling
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new APIError(error.error || "Login failed", "AUTH_ERROR", response.status);
+    }
+
+    const data = await response.json();
+    // Return compatible format for existing code
+    return { access_token: "httponly", token: "httponly", user: data.user };
   },
 
   async register(email: string, password: string, name?: string, organizationName?: string): Promise<{ access_token: string; user: User }> {
-    const { data } = await api.post("/auth/register", { email, password, name, organization_name: organizationName });
-    return data;
+    const response = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, name, organization_name: organizationName }),
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new APIError(error.error || "Registration failed", "AUTH_ERROR", response.status);
+    }
+
+    const data = await response.json();
+    return { access_token: "httponly", user: data.user };
   },
 
   async logout(): Promise<void> {
-    await api.post("/auth/logout");
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("auth_token");
-    }
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
   },
 
   async getCurrentUser(): Promise<User> {
-    const { data } = await api.get("/auth/me");
-    return data;
+    const response = await fetch("/api/auth/me", {
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new APIError("Not authenticated", "AUTH_ERROR", response.status);
+    }
+
+    return response.json();
   },
 
   async refreshToken(): Promise<{ token: string }> {
-    const { data } = await api.post("/auth/refresh");
-    return data;
+    // Token refresh is handled automatically via httpOnly cookies
+    return { token: "httponly" };
   },
 };
 

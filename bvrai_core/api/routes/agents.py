@@ -5,11 +5,14 @@ This module provides REST API endpoints for managing voice agents.
 """
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from slugify import slugify
 
 from ..base import (
     APIResponse,
@@ -26,6 +29,9 @@ from ..auth import (
     Permission,
     require_permission,
 )
+from ..dependencies import get_db_with_org_context
+from ...database.repositories import AgentRepository
+from ...database.models import Agent
 
 
 logger = logging.getLogger(__name__)
@@ -398,35 +404,70 @@ class AgentTestResponse(BaseModel):
 async def create_agent(
     request: AgentCreateRequest,
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_with_org_context),
 ):
     """Create a new voice agent."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    # In production, this would:
-    # 1. Validate voice_id with provider
-    # 2. Create agent in database
-    # 3. Initialize agent runtime
+    # Generate unique slug from name
+    base_slug = slugify(request.name) if request.name else "agent"
+    slug = f"{base_slug}-{uuid.uuid4().hex[:8]}"
 
-    agent = AgentResponse(
-        id="agt_" + "x" * 24,
+    # Prepare LLM config
+    llm_config = request.llm or LLMConfig()
+    voice_config = request.voice or VoiceConfig(voice_id="default")
+    behavior = request.behavior or BehaviorConfig()
+
+    # Create agent in database
+    repo = AgentRepository(db)
+    agent = await repo.create(
+        id=f"agt_{uuid.uuid4().hex}",
         organization_id=auth.organization_id,
         name=request.name,
         description=request.description,
+        slug=slug,
         system_prompt=request.system_prompt,
-        first_message=request.first_message,
-        industry=request.industry,
-        voice=request.voice or VoiceConfig(voice_id="default"),
-        llm=request.llm or LLMConfig(),
-        behavior=request.behavior or BehaviorConfig(),
-        transcription=request.transcription or TranscriptionConfig(),
-        knowledge_base_ids=request.knowledge_base_ids,
-        functions=request.functions,
-        metadata=request.metadata,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        first_message=request.first_message or behavior.greeting_message,
+        llm_provider=llm_config.provider,
+        llm_model=llm_config.model,
+        llm_temperature=llm_config.temperature,
+        llm_max_tokens=llm_config.max_tokens,
+        is_active=True,
+        metadata_json={
+            "industry": request.industry,
+            "voice": voice_config.dict() if voice_config else None,
+            "behavior": behavior.dict() if behavior else None,
+            "knowledge_base_ids": request.knowledge_base_ids,
+            "functions": request.functions,
+            **(request.metadata or {}),
+        },
     )
 
-    return success_response(agent.dict())
+    await db.commit()
+
+    # Build response
+    response = AgentResponse(
+        id=agent.id,
+        organization_id=agent.organization_id,
+        name=agent.name,
+        description=agent.description,
+        system_prompt=agent.system_prompt,
+        first_message=agent.first_message,
+        industry=request.industry,
+        voice=voice_config,
+        llm=llm_config,
+        behavior=behavior,
+        transcription=request.transcription or TranscriptionConfig(),
+        knowledge_base_ids=request.knowledge_base_ids or [],
+        functions=request.functions or [],
+        metadata=request.metadata or {},
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+        total_calls=agent.total_calls,
+        total_minutes=agent.total_minutes,
+    )
+
+    return success_response(response.dict())
 
 
 @router.get(
@@ -442,18 +483,63 @@ async def list_agents(
     industry: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_with_org_context),
 ):
     """List all agents."""
     auth.require_permission(Permission.AGENTS_READ)
 
-    # In production, this would query the database
-    agents = []  # Query results
+    # Query database
+    repo = AgentRepository(db)
+    skip = (page - 1) * page_size
+
+    # Get agents with filters
+    include_inactive = is_active is None or is_active is False
+    agents = await repo.list_by_organization(
+        organization_id=auth.organization_id,
+        include_inactive=include_inactive,
+        skip=skip,
+        limit=page_size,
+    )
+
+    # Filter by industry if specified (in metadata)
+    if industry:
+        agents = [
+            a for a in agents
+            if a.metadata_json and a.metadata_json.get("industry") == industry
+        ]
+
+    # Filter by search term if specified
+    if search:
+        search_lower = search.lower()
+        agents = [
+            a for a in agents
+            if search_lower in (a.name or "").lower()
+            or search_lower in (a.description or "").lower()
+        ]
+
+    # Build summaries
+    agent_summaries = [
+        AgentSummary(
+            id=a.id,
+            name=a.name,
+            description=a.description,
+            industry=a.metadata_json.get("industry") if a.metadata_json else None,
+            is_active=a.is_active,
+            total_calls=a.total_calls,
+            created_at=a.created_at,
+            updated_at=a.updated_at,
+        )
+        for a in agents
+    ]
+
+    # Get total count for pagination
+    total_count = len(agent_summaries)  # For now, use filtered count
 
     return paginated_response(
-        items=[a.dict() for a in agents],
+        items=[a.dict() for a in agent_summaries],
         page=page,
         page_size=page_size,
-        total_items=0,
+        total_items=total_count,
     )
 
 
@@ -466,13 +552,54 @@ async def list_agents(
 async def get_agent(
     agent_id: str = Path(..., description="Agent ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_with_org_context),
 ):
     """Get agent by ID."""
     auth.require_permission(Permission.AGENTS_READ)
 
-    # In production, this would query the database
-    # For now, return not found
-    raise NotFoundError("Agent", agent_id)
+    # Query database
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent or agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.is_deleted:
+        raise NotFoundError("Agent", agent_id)
+
+    # Build response from database model
+    metadata = agent.metadata_json or {}
+    voice_config = VoiceConfig(**(metadata.get("voice") or {"voice_id": "default"}))
+    behavior_config = BehaviorConfig(**(metadata.get("behavior") or {}))
+
+    response = AgentResponse(
+        id=agent.id,
+        organization_id=agent.organization_id,
+        name=agent.name,
+        description=agent.description,
+        system_prompt=agent.system_prompt,
+        first_message=agent.first_message,
+        industry=metadata.get("industry"),
+        voice=voice_config,
+        llm=LLMConfig(
+            provider=agent.llm_provider,
+            model=agent.llm_model,
+            temperature=agent.llm_temperature,
+            max_tokens=agent.llm_max_tokens,
+        ),
+        behavior=behavior_config,
+        transcription=TranscriptionConfig(),
+        knowledge_base_ids=metadata.get("knowledge_base_ids") or [],
+        functions=metadata.get("functions") or [],
+        metadata={k: v for k, v in metadata.items() if k not in ["voice", "behavior", "industry", "knowledge_base_ids", "functions"]},
+        is_active=agent.is_active,
+        created_at=agent.created_at,
+        updated_at=agent.updated_at,
+        total_calls=agent.total_calls,
+        total_minutes=agent.total_minutes,
+    )
+
+    return success_response(response.dict())
 
 
 @router.patch(
@@ -485,12 +612,65 @@ async def update_agent(
     agent_id: str = Path(..., description="Agent ID"),
     request: AgentUpdateRequest = Body(...),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_with_org_context),
 ):
     """Update an agent."""
     auth.require_permission(Permission.AGENTS_WRITE)
 
-    # In production, this would update the database
-    raise NotFoundError("Agent", agent_id)
+    # Get existing agent
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent or agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.is_deleted:
+        raise NotFoundError("Agent", agent_id)
+
+    # Build update dict
+    update_data = {}
+    if request.name is not None:
+        update_data["name"] = request.name
+    if request.description is not None:
+        update_data["description"] = request.description
+    if request.system_prompt is not None:
+        update_data["system_prompt"] = request.system_prompt
+    if request.first_message is not None:
+        update_data["first_message"] = request.first_message
+    if request.is_active is not None:
+        update_data["is_active"] = request.is_active
+
+    # Handle LLM config
+    if request.llm:
+        update_data["llm_provider"] = request.llm.provider
+        update_data["llm_model"] = request.llm.model
+        update_data["llm_temperature"] = request.llm.temperature
+        update_data["llm_max_tokens"] = request.llm.max_tokens
+
+    # Update metadata fields
+    current_metadata = agent.metadata_json or {}
+    if request.voice:
+        current_metadata["voice"] = request.voice.dict()
+    if request.behavior:
+        current_metadata["behavior"] = request.behavior.dict()
+    if request.industry is not None:
+        current_metadata["industry"] = request.industry
+    if request.knowledge_base_ids is not None:
+        current_metadata["knowledge_base_ids"] = request.knowledge_base_ids
+    if request.functions is not None:
+        current_metadata["functions"] = request.functions
+    if request.metadata is not None:
+        current_metadata.update(request.metadata)
+
+    update_data["metadata_json"] = current_metadata
+    update_data["updated_at"] = datetime.utcnow()
+
+    # Update agent
+    updated_agent = await repo.update(agent_id, **update_data)
+    await db.commit()
+
+    # Return updated agent
+    return await get_agent(agent_id, auth, db)
 
 
 @router.delete(
@@ -502,14 +682,28 @@ async def update_agent(
 async def delete_agent(
     agent_id: str = Path(..., description="Agent ID"),
     auth: AuthContext = Depends(),
+    db: AsyncSession = Depends(get_db_with_org_context),
 ):
     """Delete an agent."""
     auth.require_permission(Permission.AGENTS_DELETE)
 
-    # In production, this would:
-    # 1. Check no active calls
-    # 2. Soft delete or hard delete based on policy
-    raise NotFoundError("Agent", agent_id)
+    # Get existing agent
+    repo = AgentRepository(db)
+    agent = await repo.get_by_id(agent_id)
+
+    if not agent or agent.organization_id != auth.organization_id:
+        raise NotFoundError("Agent", agent_id)
+
+    if agent.is_deleted:
+        raise NotFoundError("Agent", agent_id)
+
+    # Soft delete the agent
+    success = await repo.soft_delete(agent_id)
+    if not success:
+        raise NotFoundError("Agent", agent_id)
+
+    await db.commit()
+    return None  # 204 No Content
 
 
 @router.post(

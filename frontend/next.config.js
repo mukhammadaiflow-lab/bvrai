@@ -21,6 +21,51 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '2mb',
     },
+    // Optimize package imports for better tree shaking
+    optimizePackageImports: [
+      'lucide-react',
+      '@radix-ui/react-alert-dialog',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-dropdown-menu',
+      '@radix-ui/react-select',
+      '@radix-ui/react-tabs',
+      '@radix-ui/react-tooltip',
+      'recharts',
+      'date-fns',
+    ],
+  },
+
+  // Webpack optimization for better code splitting
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Split vendor chunks more aggressively
+      config.optimization.splitChunks = {
+        ...config.optimization.splitChunks,
+        cacheGroups: {
+          ...config.optimization.splitChunks?.cacheGroups,
+          // Separate large libraries into their own chunks
+          radix: {
+            test: /[\\/]node_modules[\\/]@radix-ui[\\/]/,
+            name: 'radix-ui',
+            chunks: 'all',
+            priority: 30,
+          },
+          charts: {
+            test: /[\\/]node_modules[\\/](recharts|d3-[^/]+)[\\/]/,
+            name: 'charts',
+            chunks: 'all',
+            priority: 25,
+          },
+          icons: {
+            test: /[\\/]node_modules[\\/]lucide-react[\\/]/,
+            name: 'icons',
+            chunks: 'all',
+            priority: 20,
+          },
+        },
+      };
+    }
+    return config;
   },
 
   // Optimize for production

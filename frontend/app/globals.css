@@ -16,13 +16,13 @@
     --primary: 262 83% 58%;
     --primary-foreground: 0 0% 100%;
 
-    /* Secondary: Soft gray with violet tint */
+    /* Secondary: Soft gray with violet tint - Improved contrast */
     --secondary: 260 5% 96%;
-    --secondary-foreground: 240 5.9% 10%;
+    --secondary-foreground: 260 10% 15%;
 
-    /* Muted */
+    /* Muted - Improved contrast for WCAG AA compliance */
     --muted: 260 5% 95%;
-    --muted-foreground: 240 3.8% 46.1%;
+    --muted-foreground: 240 5% 35%;
 
     /* Accent: Warm coral/orange for CTAs */
     --accent: 24 95% 53%;
@@ -90,7 +90,7 @@
     --secondary: 260 10% 14%;
     --secondary-foreground: 0 0% 95%;
     --muted: 260 10% 14%;
-    --muted-foreground: 240 5% 65%;
+    --muted-foreground: 240 5% 70%;
 
     /* Accent stays warm */
     --accent: 24 95% 58%;

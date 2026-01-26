@@ -198,10 +198,11 @@ class DatabaseManager:
     def __init__(
         self,
         database_url: str,
-        pool_size: int = 5,
-        max_overflow: int = 10,
-        pool_timeout: int = 30,
-        pool_recycle: int = 1800,
+        pool_size: int = 20,
+        max_overflow: int = 30,
+        pool_timeout: int = 10,
+        pool_recycle: int = 900,
+        pool_pre_ping: bool = True,
         echo: bool = False,
     ):
         """
@@ -209,11 +210,15 @@ class DatabaseManager:
 
         Args:
             database_url: Database connection URL
-            pool_size: Size of connection pool
-            max_overflow: Max connections beyond pool size
-            pool_timeout: Timeout for acquiring connection
-            pool_recycle: Recycle connections after this many seconds
+            pool_size: Size of connection pool (default 20 for production)
+            max_overflow: Max connections beyond pool size (default 30)
+            pool_timeout: Timeout for acquiring connection (default 10s)
+            pool_recycle: Recycle connections after this many seconds (default 15 min)
+            pool_pre_ping: Pre-ping connections to check health (default True)
             echo: Echo SQL statements (for debugging)
+
+        Note: Production defaults sized for 100M+ calls/month.
+        Adjust based on database instance size and concurrent load.
         """
         # Convert sync URL to async if needed
         if database_url.startswith("postgresql://"):
@@ -234,6 +239,7 @@ class DatabaseManager:
         self._max_overflow = max_overflow
         self._pool_timeout = pool_timeout
         self._pool_recycle = pool_recycle
+        self._pool_pre_ping = pool_pre_ping
         self._echo = echo
 
         self._engine: Optional[AsyncEngine] = None
@@ -249,6 +255,7 @@ class DatabaseManager:
                 max_overflow=self._max_overflow,
                 pool_timeout=self._pool_timeout,
                 pool_recycle=self._pool_recycle,
+                pool_pre_ping=self._pool_pre_ping,
                 echo=self._echo,
             )
         return self._engine
